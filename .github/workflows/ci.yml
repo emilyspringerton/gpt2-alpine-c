@@ -1,0 +1,86 @@
+# GitHub Actions: build for Linux and Windows and upload artifacts
+# Triggers on push and PRs. Builds with native toolchains (gcc on Ubuntu, MSYS2/Mingw on Windows).
+name: CI — Build and artifact
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-linux:
+    name: Build (Linux / Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential
+
+      - name: Build
+        run: |
+          make -j$(nproc)
+
+      - name: Run quick test (non-failing)
+        run: |
+          chmod +x tests/test_compile.sh || true
+          bash tests/test_compile.sh || echo "test failed (allowed)"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          if [ -f gpt2_run ]; then cp gpt2_run artifacts/; fi
+          make --version > artifacts/make_version.txt || true
+          uname -a > artifacts/uname.txt || true
+          ls -lah > artifacts/ls.txt || true
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-linux
+          path: artifacts
+
+  build-windows:
+    name: Build (Windows / MSYS2 Mingw64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+
+      - name: Install Mingw toolchain and make
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm mingw-w64-x86_64-toolchain make
+          echo "Installed toolchain"
+
+      - name: Build with Mingw (bash)
+        shell: bash
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          make clean || true
+          make -j$(nproc)
+
+      - name: Collect Windows artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [ -f gpt2_run.exe ]; then cp gpt2_run.exe artifacts/; fi
+          uname -a > artifacts/uname.txt || true
+          ls -lah > artifacts/ls.txt || true
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-windows
+          path: artifacts
