@@ -1,14 +1,16 @@
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
 
-#include "gpt2.h"  // For VOCAB_SIZE, EOS_TOKEN
+#include <stddef.h>
+
+#define GPT2_VOCAB_SIZE 50257
 
 typedef struct {
     int len;
     char *bytes;
 } TokenStr;
 
-extern TokenStr decoder[VOCAB_SIZE];
+extern TokenStr decoder[GPT2_VOCAB_SIZE];
 
 typedef struct {
     int first;

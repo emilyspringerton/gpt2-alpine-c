@@ -1,6 +1,9 @@
 #include "tokenizer.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-TokenStr decoder[VOCAB_SIZE];
+TokenStr decoder[GPT2_VOCAB_SIZE];
 
 int num_merges;
 Merge *merges;
@@ -14,12 +17,12 @@ void tokenizer_load(const char *path) {
     
     int vs;
     fread(&vs, sizeof(int), 1, f);
-    if (vs != VOCAB_SIZE) {
+    if (vs != GPT2_VOCAB_SIZE) {
         fprintf(stderr, "Vocab size mismatch\n");
         exit(1);
     }
     
-    for (int i = 0; i < VOCAB_SIZE; i++) {
+    for (int i = 0; i < GPT2_VOCAB_SIZE; i++) {
         fread(&decoder[i].len, sizeof(int), 1, f);
         decoder[i].bytes = malloc(decoder[i].len);
         fread(decoder[i].bytes, 1, decoder[i].len, f);
@@ -33,7 +36,7 @@ void tokenizer_load(const char *path) {
 }
 
 void tokenizer_free() {
-    for (int i = 0; i < VOCAB_SIZE; i++) {
+    for (int i = 0; i < GPT2_VOCAB_SIZE; i++) {
         free(decoder[i].bytes);
     }
     free(merges);

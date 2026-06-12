@@ -1,6 +1,7 @@
 CC = gcc
-CFLAGS = -O2 -std=c11 -Wall -Wextra -lm
-SRC = src/gpt2.c src/checkpoint_loader.c src/main.c
+CFLAGS = -O2 -std=c11 -Wall -Wextra -Isrc
+LDFLAGS = -lm
+SRC = src/gpt2.c src/checkpoint_loader.c src/tokenizer.c src/main.c
 OBJ = $(SRC:.c=.o)
 BIN = gpt2_run
 
@@ -10,7 +11,7 @@ all: $(BIN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BIN): $(OBJ)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:
 	rm -f $(OBJ) $(BIN)
