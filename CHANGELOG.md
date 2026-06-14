@@ -1,6 +1,7 @@
 # gpt2-alpine-c Changelog
 
 ## 2026-06-14 (session 5 — C warnings + NORTHSTAR + emily train stats)
+- add SEC filing, press release, and TYLER corpus sources to prime_directive_dataset.py; auto-discover PRRJECT_FATBABY and TYLER sibling repos; --fatbaby-root, --tyler-root, --max-sec-docs, --max-pr-docs flags
 
 - fix(c): tokenizer.c fread return value checks — build now warning-clean (-Wall -Wextra); exits with diagnostic on read failure
 - docs(northstar): Milestone 1.5 DONE; corpus stats added (327 LM / 456 instruct records); PPL baseline 116.76 reference; updated key files table
