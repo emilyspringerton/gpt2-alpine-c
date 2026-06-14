@@ -1,0 +1,6 @@
+weights/*.bin
+gpt2_run
+*.o
+__pycache__/
+*.pyc
+downloads/
