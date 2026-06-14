@@ -69,8 +69,8 @@ Emily's training corpus is built from:
 5. **Prime directive instruct pairs** — 24 Q&A pairs: 8 hardcoded identity/protocol + section-level (`--mode instruct`)
 6. **BACKLOG done items** — 104 instruction pairs from `- [x]` entries (`--mode instruct`)
 
-LM corpus: 327 records / ~110k tokens / ~1.6 min T4 training
-Instruct corpus: 456 records / ~133k tokens / ~1.9 min T4 training
+Colab corpus (--colab preset, Emily operational only): ~466 records / ~154k tokens / ~2.2 min T4 training
+Full corpus (--no-colab, all sources): ~7184 records / ~32M tokens / ~469 min T4 training (not for Colab)
 
 Format: JSONL, each line `{"text": "..."}` for language modeling or
 `{"prompt": "...", "completion": "..."}` for instruction fine-tuning.
@@ -88,8 +88,8 @@ The corpus teaches the model:
 |-----------|--------|-------------|
 | 0: C inference engine | DONE | GPT-2 small forward pass, tokenizer, entropy stats |
 | 1: Training tooling | DONE | Dataset builder, Drive sync, Colab notebook, FT converter |
-| 1.5: Corpus quality | DONE | Apple log source, instruct pairs, stats tool, 28 unit tests |
-| 2: Prime directive fine-tune | PENDING (manual) | Run notebooks/gpt2_finetune_colab.ipynb on Colab T4 GPU |
+| 1.5: Corpus quality | DONE | Colab preset (466 records/2.2 min T4), deduplication, stats tool, 28 unit tests |
+| 2: Prime directive fine-tune | PENDING (manual) | Run notebooks/gpt2_finetune_colab.ipynb on Colab T4 GPU with Colab corpus |
 | 3: Checkpoint validation | NOT STARTED | Run fine-tuned model through gpt2_run; validate entropy |
 | 4: Emily domain vocabulary | NOT STARTED | Compare PPL base (116.76) vs fine-tuned on same eval set |
 | 5: Emily Prime deployment | NOT STARTED | Replace haiku calls with local model for routine classification |

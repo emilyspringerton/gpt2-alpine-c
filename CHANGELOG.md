@@ -1,5 +1,14 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-14 (session 6 — colab preset + deduplication)
+- feat(corpus): --colab preset in prime_directive_dataset.py — Emily operational text only (no SEC/press/TYLER raw crawl), deduped, max 1500 records; produces 466 records / 154k tokens / 2.2 min T4 (was 7184 records / 32M tokens / 469 min)
+- feat(corpus): hash-based deduplication (--dedupe / --no-dedupe; default on)
+- feat(corpus): stratified sampling cap (--max-records N; preserves source distribution)
+- feat(corpus): --no-sec, --no-press-releases, --no-tyler exclusion flags
+- fix(corpus): PRRJECT_FATBABY and TYLER no longer auto-discovered — must be explicit via --fatbaby-root / --tyler-root (prevents corpus explosion)
+- feat(emily.cli): emily train build-dataset defaults to --colab preset; --no-colab to get full corpus
+- docs(northstar): Milestone 1.5 updated with accurate corpus numbers
+
 ## 2026-06-14 (session 5 — C warnings + NORTHSTAR + emily train stats)
 - add SEC filing, press release, and TYLER corpus sources to prime_directive_dataset.py; auto-discover PRRJECT_FATBABY and TYLER sibling repos; --fatbaby-root, --tyler-root, --max-sec-docs, --max-pr-docs flags
 

@@ -342,12 +342,146 @@ def apples_to_records(apples_dir: Path, max_apples: int, verbose: bool) -> list[
     return records
 
 
+def sec_filings_to_records(fatbaby_root: Path, max_docs: int, verbose: bool) -> list[dict]:
+    """Extract SEC filing text from secwatch source_document_persisted events."""
+    records = []
+    events_dir = fatbaby_root / "var" / "secwatch" / "events"
+    if not events_dir.exists():
+        if verbose:
+            print(f"  sec-filings: events dir not found: {events_dir}", file=sys.stderr)
+        return records
+
+    skipped = 0
+    total = 0
+    for ndjson_path in sorted(events_dir.glob("*.ndjson")):
+        with open(ndjson_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                    e = d.get("event", {})
+                    if e.get("type") != "source_document_persisted":
+                        continue
+                    data = e.get("data", {})
+                    text = (data.get("cleaned_text") or "").strip()
+                    if not text or len(text) < 100:
+                        skipped += 1
+                        continue
+                    ticker = data.get("ticker", "")
+                    form = data.get("form", "") or data.get("source_type", "")
+                    header = f"SEC Filing [{form}] - {ticker}\n" if (form or ticker) else "SEC Filing\n"
+                    combined = header + text
+                    for chunk in chunk_text(combined):
+                        if len(chunk.strip()) >= 50:
+                            records.append({"text": chunk, "_source": "sec-filings"})
+                    total += 1
+                    if max_docs > 0 and total >= max_docs:
+                        break
+                except (json.JSONDecodeError, OSError):
+                    skipped += 1
+        if max_docs > 0 and total >= max_docs:
+            break
+
+    if verbose:
+        print(f"  sec-filings: {len(records)} chunks from {total} docs ({skipped} skipped)")
+    return records
+
+
+def press_releases_to_records(fatbaby_root: Path, max_docs: int, verbose: bool) -> list[dict]:
+    """Extract press release text from prwatch-body pr_body_fetched events."""
+    records = []
+    events_dir = fatbaby_root / "var" / "prwatch-body" / "events"
+    if not events_dir.exists():
+        if verbose:
+            print(f"  press-releases: events dir not found: {events_dir}", file=sys.stderr)
+        return records
+
+    skipped = 0
+    total = 0
+    for ndjson_path in sorted(events_dir.glob("*.ndjson")):
+        with open(ndjson_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                    e = d.get("event", {})
+                    if e.get("type") != "pr_body_fetched":
+                        continue
+                    data = e.get("data", {})
+                    body = (data.get("body") or "").strip()
+                    headline = (data.get("headline") or "").strip()
+                    if not body or len(body) < 100:
+                        skipped += 1
+                        continue
+                    combined = (f"Press Release: {headline}\n\n" if headline else "") + body
+                    for chunk in chunk_text(combined):
+                        if len(chunk.strip()) >= 50:
+                            records.append({"text": chunk, "_source": "press-releases"})
+                    total += 1
+                    if max_docs > 0 and total >= max_docs:
+                        break
+                except (json.JSONDecodeError, OSError):
+                    skipped += 1
+        if max_docs > 0 and total >= max_docs:
+            break
+
+    if verbose:
+        print(f"  press-releases: {len(records)} chunks from {total} docs ({skipped} skipped)")
+    return records
+
+
+TYLER_DIRS = ["episodes", "lore", "engine", "characters", "manuscripts", "memos", "outlines"]
+TYLER_ROOT_FILES = ["README.md", "universe_engine.md", "THE_FIELD.md", "CITY_OF_LIGHT.md"]
+
+
+def tyler_to_records(tyler_root: Path, verbose: bool) -> list[dict]:
+    """Chunk all TYLER episode scripts, lore, and docs into LM records."""
+    records = []
+    paths: list[Path] = []
+
+    for fname in TYLER_ROOT_FILES:
+        p = tyler_root / fname
+        if p.exists():
+            paths.append(p)
+
+    for dirname in TYLER_DIRS:
+        d = tyler_root / dirname
+        if d.exists():
+            paths.extend(sorted(d.rglob("*.md")))
+
+    skipped = 0
+    for p in paths:
+        try:
+            text = p.read_text().strip()
+            if len(text) < 50:
+                skipped += 1
+                continue
+            rel = str(p.relative_to(tyler_root))
+            for chunk in chunk_text(text):
+                if len(chunk.strip()) >= 50:
+                    records.append({"text": chunk, "_source": f"tyler/{rel}"})
+        except OSError:
+            skipped += 1
+
+    if verbose:
+        print(f"  tyler: {len(records)} chunks from {len(paths) - skipped} files ({skipped} skipped)")
+    return records
+
+
 def build_corpus(
     emily_root: Path,
     mode: str,
     verbose: bool,
     apples_dir: Path | None = None,
     max_apples: int = 500,
+    fatbaby_root: Path | None = None,
+    max_sec_docs: int = 2000,
+    max_pr_docs: int = 1000,
+    tyler_root: Path | None = None,
 ) -> list[dict]:
     records = []
 
@@ -432,7 +566,60 @@ def build_corpus(
         if verbose:
             print(f"  WARNING: apples-dir not found: {apples_dir}", file=sys.stderr)
 
+    # 7. SEC filing text (cleaned_text from source_document_persisted events)
+    if fatbaby_root:
+        r = sec_filings_to_records(fatbaby_root, max_sec_docs, verbose)
+        records.extend(r)
+
+    # 8. Press release bodies (pr_body_fetched events from prwatch-body)
+    if fatbaby_root:
+        r = press_releases_to_records(fatbaby_root, max_pr_docs, verbose)
+        records.extend(r)
+
+    # 9. TYLER episode scripts, lore, and universe docs
+    if tyler_root and tyler_root.exists():
+        r = tyler_to_records(tyler_root, verbose)
+        records.extend(r)
+    elif tyler_root:
+        if verbose:
+            print(f"  WARNING: tyler-root not found: {tyler_root}", file=sys.stderr)
+
     return records
+
+
+def deduplicate(records: list[dict]) -> tuple[list[dict], int]:
+    """Remove exact duplicate text content by hash. Returns (deduped, n_removed)."""
+    seen: set[int] = set()
+    out = []
+    for rec in records:
+        key = rec.get("text") or (rec.get("prompt", "") + rec.get("completion", ""))
+        h = hash(key)
+        if h not in seen:
+            seen.add(h)
+            out.append(rec)
+    return out, len(records) - len(out)
+
+
+def stratified_sample(records: list[dict], max_records: int) -> list[dict]:
+    """Downsample to max_records, preserving source distribution."""
+    if max_records <= 0 or len(records) <= max_records:
+        return records
+    # Group by source
+    by_source: dict[str, list[dict]] = {}
+    for rec in records:
+        src = rec.get("_source", "unknown")
+        by_source.setdefault(src, []).append(rec)
+    # Sample proportionally from each source
+    ratio = max_records / len(records)
+    sampled = []
+    for src, recs in by_source.items():
+        n = max(1, round(len(recs) * ratio))
+        step = max(1, len(recs) // n)
+        sampled.extend(recs[::step][:n])
+    # Trim or pad to exact max_records
+    if len(sampled) > max_records:
+        sampled = sampled[:max_records]
+    return sampled
 
 
 def main():
@@ -447,30 +634,117 @@ def main():
                         help="Path to APPLES git repo (auto-discover sibling of emily-root if omitted)")
     parser.add_argument("--max-apples", type=int, default=500,
                         help="Max Apple records to include (0=unlimited, default: 500)")
+    parser.add_argument("--fatbaby-root", default=None,
+                        help="Path to PRRJECT_FATBABY repo (explicit only — no auto-discover)")
+    parser.add_argument("--max-sec-docs", type=int, default=2000,
+                        help="Max SEC filing docs to include (0=unlimited, default: 2000)")
+    parser.add_argument("--max-pr-docs", type=int, default=1000,
+                        help="Max press release docs to include (0=unlimited, default: 1000)")
+    parser.add_argument("--tyler-root", default=None,
+                        help="Path to TYLER repo (explicit only — no auto-discover)")
+    # Exclusion flags
+    parser.add_argument("--no-sec", action="store_true",
+                        help="Exclude SEC filing text (overrides --fatbaby-root sec ingestion)")
+    parser.add_argument("--no-press-releases", action="store_true",
+                        help="Exclude press release text")
+    parser.add_argument("--no-tyler", action="store_true",
+                        help="Exclude TYLER episode/lore text")
+    # Quality flags
+    parser.add_argument("--dedupe", action="store_true", default=True,
+                        help="Remove duplicate records by content hash (default: on)")
+    parser.add_argument("--no-dedupe", dest="dedupe", action="store_false",
+                        help="Disable deduplication")
+    parser.add_argument("--max-records", type=int, default=0,
+                        help="Cap total output records via stratified sampling (0=unlimited)")
+    # Preset
+    parser.add_argument("--colab", action="store_true",
+                        help="Colab-safe preset: Emily operational text only, deduped, max 1500 records."
+                             " Implies: --no-sec --no-press-releases --no-tyler --max-apples 200 --max-records 1500")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
+
+    # Apply --colab preset before anything else
+    if args.colab:
+        args.no_sec = True
+        args.no_press_releases = True
+        args.no_tyler = True
+        args.dedupe = True
+        if args.max_apples == 500:   # only override if still at default
+            args.max_apples = 200
+        if args.max_records == 0:
+            args.max_records = 1500
 
     emily_root = Path(args.emily_root)
     if not emily_root.exists():
         print(f"ERROR: EMILY root not found: {emily_root}", file=sys.stderr)
         sys.exit(1)
 
+    repo_parent = emily_root.parent
+
     # Auto-discover APPLES as sibling of EMILY if not specified
     apples_dir: Path | None = None
     if args.apples_dir:
         apples_dir = Path(args.apples_dir)
     else:
-        candidate = emily_root.parent / "APPLES"
+        candidate = repo_parent / "APPLES"
         if candidate.exists():
             apples_dir = candidate
 
-    if args.verbose:
-        print(f"Building corpus from {emily_root} (mode={args.mode})")
-        if apples_dir:
-            print(f"  Apples dir: {apples_dir} (max {args.max_apples})")
+    # PRRJECT_FATBABY — explicit only (no auto-discover to avoid corpus explosion)
+    fatbaby_root: Path | None = None
+    if args.fatbaby_root:
+        fatbaby_root = Path(args.fatbaby_root)
 
-    records = build_corpus(emily_root, args.mode, args.verbose,
-                           apples_dir=apples_dir, max_apples=args.max_apples)
+    # TYLER — explicit only
+    tyler_root: Path | None = None
+    if args.tyler_root:
+        tyler_root = Path(args.tyler_root)
+
+    # Apply exclusion flags after auto-discovery
+    if args.no_sec or args.no_press_releases:
+        fatbaby_root = None  # nothing to read from fatbaby if both excluded
+    if args.no_tyler:
+        tyler_root = None
+
+    if args.verbose:
+        preset = " [--colab preset]" if args.colab else ""
+        print(f"Building corpus from {emily_root} (mode={args.mode}){preset}")
+        if apples_dir:
+            print(f"  Apples dir:   {apples_dir} (max {args.max_apples})")
+        if fatbaby_root:
+            print(f"  FatBaby root: {fatbaby_root} (sec max {args.max_sec_docs}, pr max {args.max_pr_docs})")
+        else:
+            print(f"  SEC/press:    excluded")
+        if tyler_root:
+            print(f"  TYLER root:   {tyler_root}")
+        else:
+            print(f"  TYLER:        excluded")
+        if args.dedupe:
+            print(f"  Deduplication: enabled")
+        if args.max_records > 0:
+            print(f"  Max records:  {args.max_records} (stratified)")
+
+    records = build_corpus(
+        emily_root, args.mode, args.verbose,
+        apples_dir=apples_dir, max_apples=args.max_apples,
+        fatbaby_root=fatbaby_root,
+        max_sec_docs=args.max_sec_docs,
+        max_pr_docs=args.max_pr_docs,
+        tyler_root=tyler_root,
+    )
+
+    # Deduplication
+    if args.dedupe:
+        records, n_removed = deduplicate(records)
+        if args.verbose and n_removed:
+            print(f"  Deduplication: removed {n_removed} duplicates → {len(records)} records")
+
+    # Stratified cap
+    if args.max_records > 0 and len(records) > args.max_records:
+        before = len(records)
+        records = stratified_sample(records, args.max_records)
+        if args.verbose:
+            print(f"  Capped: {before} → {len(records)} records (stratified)")
 
     # Write output — keep _source metadata (ignored by HuggingFace Trainer, used by corpus_stats.py)
     out_path = Path(args.output)
