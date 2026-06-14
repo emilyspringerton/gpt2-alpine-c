@@ -96,11 +96,11 @@ def eval_model(model, tokenizer, texts: list[str], max_length: int = 512,
             total_tokens += n_tokens
             n_examples += len(batch)
 
-            if (i // batch_size) % 10 == 0:
+            if (i // batch_size) % max(1, (len(texts) // batch_size // 5)) == 0:
                 done = min(i + batch_size, len(texts))
-                print(f"  {done}/{len(texts)} examples evaluated...", end="\r", flush=True)
+                print(f"  {done}/{len(texts)} examples...", end="\r", flush=True)
 
-    print()
+    print(f"  {len(texts)}/{len(texts)} done.     ")
     mean_loss = total_loss / max(total_tokens, 1)
     perplexity = math.exp(mean_loss)
     return {
@@ -145,7 +145,14 @@ def main():
     parser.add_argument("--eval-frac", type=float, default=0.1,
                         help="Fraction of corpus to use for eval (default: 0.1 = 10%%)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--memory-efficient", action="store_true",
+                        help="Use CPU-safe settings (batch=1, max_length=64) for low-RAM machines")
     args = parser.parse_args()
+
+    if args.memory_efficient:
+        args.batch_size = 1
+        args.max_length = 64
+        args.eval_frac = min(args.eval_frac, 0.05)
 
     try:
         import torch

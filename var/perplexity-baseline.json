@@ -3,18 +3,19 @@
   "model": "gpt2",
   "corpus": "emily-corpus.jsonl",
   "corpus_records": 327,
-  "corpus_size_kb": 472.1,
+  "corpus_size_kb": 480.5,
   "eval_settings": {
-    "eval_frac": 0.03,
+    "eval_frac": 0.05,
     "batch_size": 1,
     "max_length": 64,
-    "seed": 42
+    "seed": 42,
+    "flag": "--memory-efficient"
   },
   "results": {
-    "n_examples": 9,
-    "n_tokens": 576,
-    "loss": 4.87,
-    "perplexity": 130.33
+    "n_examples": 16,
+    "n_tokens": 1024,
+    "loss": 4.7601,
+    "perplexity": 116.76
   },
-  "notes": "Base GPT-2 (124M) on Emily Prime domain corpus. High PPL expected — Emily operational vocabulary (Apple, RSI, obs-watcher, HEIMDAL, IDUNA) is out-of-distribution for WebText-trained GPT-2. Post-fine-tune target: PPL < 60 on same eval set."
+  "notes": "Base GPT-2 (124M) on Emily Prime domain corpus. High PPL expected — Emily operational vocabulary (Apple, RSI, obs-watcher, HEIMDAL, IDUNA) is out-of-distribution for WebText-trained GPT-2 (baseline WebText PPL ~29). Post-fine-tune target: PPL < 60 on same eval set and settings."
 }
