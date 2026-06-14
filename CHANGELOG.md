@@ -1,5 +1,11 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-14 (session 5 — C warnings + NORTHSTAR + emily train stats)
+
+- fix(c): tokenizer.c fread return value checks — build now warning-clean (-Wall -Wextra); exits with diagnostic on read failure
+- docs(northstar): Milestone 1.5 DONE; corpus stats added (327 LM / 456 instruct records); PPL baseline 116.76 reference; updated key files table
+- feat(emily.cli): emily train stats subcommand — shells to corpus_stats.py; auto-discovers gpt2-alpine-c; -v for source breakdown
+
 ## 2026-06-14 (session 4 — corpus quality + eval hardening)
 
 - feat(corpus): scripts/corpus_stats.py — pre-upload quality checker; token estimate, Colab training time, source breakdown, duplicate detection; exits non-zero on quality failure
