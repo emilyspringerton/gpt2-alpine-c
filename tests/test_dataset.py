@@ -23,6 +23,7 @@ from prime_directive_dataset import (
     chunk_text,
     make_lm_records,
     parse_golden_index,
+    prime_directive_to_instruct,
 )
 
 
@@ -124,6 +125,63 @@ class TestParseGoldenIndex(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             entries = parse_golden_index(Path(tmp))
         self.assertEqual(entries, [])
+
+
+class TestPrimeDirectiveInstruct(unittest.TestCase):
+    SAMPLE_PRIME = """# Emily's Prime Directive
+## Executive Alignment
+
+**Emily's Core Purpose:** Use AI to build tools that collect data to train in-house models.
+
+Value Chain: Data Collection → Data Processing → Training Dataset → LLM
+
+## 1. DATA COLLECTION MISSION
+
+Emily collects high-quality data from Reddit and Wikipedia at scale.
+Quality filters ensure only substantive content reaches the training pipeline.
+Daily target: 10,000 posts from 50+ subreddits.
+
+## 2. ITERATIVE RSI LOOPS
+
+The RSI (Recursive Self-Improvement) loop runs every 5 minutes:
+OBSERVE → DECIDE → ACT → PLAN → file Apple → repeat.
+"""
+
+    def test_returns_list_of_pairs(self):
+        pairs = prime_directive_to_instruct(self.SAMPLE_PRIME)
+        self.assertIsInstance(pairs, list)
+        self.assertGreater(len(pairs), 0)
+
+    def test_all_pairs_have_prompt_and_completion(self):
+        pairs = prime_directive_to_instruct(self.SAMPLE_PRIME)
+        for p in pairs:
+            self.assertIn("prompt", p, f"Missing prompt: {p}")
+            self.assertIn("completion", p, f"Missing completion: {p}")
+
+    def test_fixed_identity_pair_present(self):
+        pairs = prime_directive_to_instruct(self.SAMPLE_PRIME)
+        prompts = [p["prompt"] for p in pairs]
+        self.assertTrue(any("Who are you" in pr or "core purpose" in pr for pr in prompts))
+
+    def test_section_pairs_extracted(self):
+        pairs = prime_directive_to_instruct(self.SAMPLE_PRIME)
+        # Should have at least the fixed pairs + one section pair
+        self.assertGreater(len(pairs), 8)
+
+    def test_short_sections_skipped(self):
+        short_prime = "## Empty Section\n\nShort.\n"
+        pairs = prime_directive_to_instruct(short_prime)
+        # Only fixed pairs, no section pairs for short content
+        section_pairs = [p for p in pairs if "Describe Emily Prime" in p["prompt"]]
+        self.assertEqual(len(section_pairs), 0)
+
+    def test_long_sections_truncated(self):
+        long_body = "Detail. " * 300
+        long_prime = f"## Long Section\n\n{long_body}\n"
+        pairs = prime_directive_to_instruct(long_prime)
+        section_pairs = [p for p in pairs if "Long Section" in p["prompt"]]
+        if section_pairs:
+            self.assertLessEqual(len(section_pairs[0]["completion"]), 1500)
 
 
 class TestApplesRecords(unittest.TestCase):
