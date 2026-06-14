@@ -1,5 +1,12 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-14 (session 4 — corpus quality + eval hardening)
+
+- feat(corpus): scripts/corpus_stats.py — pre-upload quality checker; token estimate, Colab training time, source breakdown, duplicate detection; exits non-zero on quality failure
+- fix(corpus): retain _source metadata in output JSONL (harmless to Trainer; needed by corpus_stats.py source breakdown); LM corpus 327 records / ~110k tokens; instruct 456 records / ~133k tokens
+- feat(eval): eval_perplexity.py --memory-efficient flag (batch=1 / max_length=64 / eval_frac≤5%); prevents CPU OOM on GPT-2 forward pass
+- eval: updated PPL baseline — 16-example run: loss=4.7601, PPL=116.76 (WebText baseline: ~29; target post-FT: <60)
+
 ## 2026-06-14 (session 3 — S26-06)
 
 - feat(corpus/S26-06): prime_directive_to_instruct() — 8 hardcoded Emily identity/protocol Q&A pairs + section-level pairs from prime directive ## headings; instruct corpus: 128 pairs / 455 records / 568KB
