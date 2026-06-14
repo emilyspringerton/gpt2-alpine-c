@@ -47,11 +47,14 @@ Inference Engine (C, Alpine/musl):
 | `src/main.c` | CLI: generate tokens + entropy stats (used as RSI entropy source) |
 | `convert_checkpoint.py` | Convert HuggingFace gpt2 checkpoint → flat binary (inference) |
 | `scripts/convert_ft_checkpoint.py` | Convert fine-tuned HF checkpoint → flat binary (training output) |
-| `scripts/prime_directive_dataset.py` | Build training JSONL from Emily golden docs + prime directive |
+| `scripts/prime_directive_dataset.py` | Build JSONL from golden docs + prime directive + Apple log + instruct pairs |
+| `scripts/corpus_stats.py` | Pre-upload quality check (token count, source breakdown, Colab estimate) |
+| `scripts/eval_perplexity.py` | Perplexity eval base vs fine-tuned; `--memory-efficient` for CPU |
 | `scripts/drive_sync.py` | Upload/download training artifacts via IDUNA Drive API |
 | `notebooks/gpt2_finetune_colab.ipynb` | Colab notebook: HF Trainer fine-tune + save checkpoint |
-| `weights/model.bin` | GPT-2 small weights (binary, downloaded separately) |
-| `Makefile` | `make` → builds gpt2_run |
+| `var/perplexity-baseline.json` | Base GPT-2 PPL on Emily corpus: 116.76 (target post-FT: <60) |
+| `weights/model.bin` | GPT-2 small weights (binary, not in git) |
+| `Makefile` | `make` → builds gpt2_run; `make test` → compile + 28 Python unit tests |
 | `Dockerfile` | Alpine/musl build environment |
 
 ---
@@ -59,11 +62,15 @@ Inference Engine (C, Alpine/musl):
 ## Training Dataset: The Prime Directive Corpus
 
 Emily's training corpus is built from:
-1. **Golden docs** — all Tier 1 + Tier 2 docs from `EMILY/context/golden-docs-index.md`
-2. **Prime directive** — `EMILY/docs/emily-prime-directive-data-collection.md`
+1. **Golden docs** — all Tier 1 + Tier 2 docs from `EMILY/context/golden-docs-index.md` (39 sources, ~321 chunks)
+2. **Prime directive** — `EMILY/docs/emily-prime-directive-data-collection.md` (~29 chunks)
 3. **RSI task history** — `EMILY/var/training-data/*.jsonl` (collected passively)
-4. **Apple log** — recent Apple bodies from IDUNA (structured domain text)
-5. **BACKLOG + DONE** — backlog items as instruction-following pairs
+4. **Apple log** — APPLES git repo JSON files (auto-discovered as sibling of EMILY; `--apples-dir`)
+5. **Prime directive instruct pairs** — 24 Q&A pairs: 8 hardcoded identity/protocol + section-level (`--mode instruct`)
+6. **BACKLOG done items** — 104 instruction pairs from `- [x]` entries (`--mode instruct`)
+
+LM corpus: 327 records / ~110k tokens / ~1.6 min T4 training
+Instruct corpus: 456 records / ~133k tokens / ~1.9 min T4 training
 
 Format: JSONL, each line `{"text": "..."}` for language modeling or
 `{"prompt": "...", "completion": "..."}` for instruction fine-tuning.
@@ -81,9 +88,10 @@ The corpus teaches the model:
 |-----------|--------|-------------|
 | 0: C inference engine | DONE | GPT-2 small forward pass, tokenizer, entropy stats |
 | 1: Training tooling | DONE | Dataset builder, Drive sync, Colab notebook, FT converter |
-| 2: Prime directive fine-tune | IN PROGRESS | First experimental fine-tune on Colab |
+| 1.5: Corpus quality | DONE | Apple log source, instruct pairs, stats tool, 28 unit tests |
+| 2: Prime directive fine-tune | PENDING (manual) | Run notebooks/gpt2_finetune_colab.ipynb on Colab T4 GPU |
 | 3: Checkpoint validation | NOT STARTED | Run fine-tuned model through gpt2_run; validate entropy |
-| 4: Emily domain vocabulary | NOT STARTED | Measure perplexity on Emily operational text |
+| 4: Emily domain vocabulary | NOT STARTED | Compare PPL base (116.76) vs fine-tuned on same eval set |
 | 5: Emily Prime deployment | NOT STARTED | Replace haiku calls with local model for routine classification |
 
 ---

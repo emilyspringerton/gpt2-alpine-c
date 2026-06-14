@@ -16,21 +16,32 @@ void tokenizer_load(const char *path) {
     }
     
     int vs;
-    fread(&vs, sizeof(int), 1, f);
-    if (vs != GPT2_VOCAB_SIZE) {
-        fprintf(stderr, "Vocab size mismatch\n");
+    if (fread(&vs, sizeof(int), 1, f) != 1 || vs != GPT2_VOCAB_SIZE) {
+        fprintf(stderr, "Vocab size mismatch or read error\n");
         exit(1);
     }
-    
+
     for (int i = 0; i < GPT2_VOCAB_SIZE; i++) {
-        fread(&decoder[i].len, sizeof(int), 1, f);
+        if (fread(&decoder[i].len, sizeof(int), 1, f) != 1) {
+            fprintf(stderr, "Failed to read token length at index %d\n", i);
+            exit(1);
+        }
         decoder[i].bytes = malloc(decoder[i].len);
-        fread(decoder[i].bytes, 1, decoder[i].len, f);
+        if (fread(decoder[i].bytes, 1, decoder[i].len, f) != (size_t)decoder[i].len) {
+            fprintf(stderr, "Failed to read token bytes at index %d\n", i);
+            exit(1);
+        }
     }
-    
-    fread(&num_merges, sizeof(int), 1, f);
+
+    if (fread(&num_merges, sizeof(int), 1, f) != 1) {
+        fprintf(stderr, "Failed to read num_merges\n");
+        exit(1);
+    }
     merges = malloc(num_merges * sizeof(Merge));
-    fread(merges, sizeof(Merge), num_merges, f);
+    if (fread(merges, sizeof(Merge), num_merges, f) != (size_t)num_merges) {
+        fprintf(stderr, "Failed to read merge table\n");
+        exit(1);
+    }
     
     fclose(f);
 }
