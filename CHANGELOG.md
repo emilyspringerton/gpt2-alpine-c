@@ -1,5 +1,12 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-14 (session 3 — S26-06)
+
+- feat(corpus/S26-06): prime_directive_to_instruct() — 8 hardcoded Emily identity/protocol Q&A pairs + section-level pairs from prime directive ## headings; instruct corpus: 128 pairs / 455 records / 568KB
+- eval(S26-06): GPT-2 base perplexity on Emily corpus = 130.33 (max_length=64, seed=42); saved to var/perplexity-baseline.json; post-fine-tune target PPL < 60
+- test: 6 new tests for prime_directive_to_instruct; 28 total, all green
+- Apple #488 filed; S26-06 marked done in EMILY/BACKLOG.md
+
 ## 2026-06-14 (session 2)
 
 - feat(corpus): Apple log as corpus source #6 — reads APPLES git repo JSON files; auto-discovers APPLES sibling; adds --apples-dir / --max-apples CLI flags; 321 → 327 records on live repo
