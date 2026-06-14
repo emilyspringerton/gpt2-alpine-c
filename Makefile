@@ -13,7 +13,11 @@ all: $(BIN)
 $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
+test: $(BIN)
+	@bash tests/test_compile.sh
+	@python3 -m pytest tests/test_dataset.py -v 2>/dev/null || python3 tests/test_dataset.py
+
 clean:
 	rm -f $(OBJ) $(BIN)
 
-.PHONY: all clean
+.PHONY: all clean test

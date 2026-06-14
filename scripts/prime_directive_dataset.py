@@ -10,6 +10,8 @@ Usage:
         --emily-root /home/fatbaby/EMILY \
         --output /tmp/emily-corpus.jsonl \
         [--mode lm|instruct] \
+        [--apples-dir /home/fatbaby/APPLES] \
+        [--max-apples 500] \
         [--verbose]
 """
 
@@ -27,6 +29,7 @@ FULL_CONTEXT_PATH = "context/full-system-context.md"
 BACKLOG_PATH = "BACKLOG.md"
 
 CHUNK_SIZE = 1500
+APPLE_MAX_BODY_CHARS = 2000
 
 
 def parse_golden_index(emily_root: Path) -> list[dict]:
@@ -136,7 +139,78 @@ def backlog_to_instruct(backlog_text: str) -> list[dict]:
     return records
 
 
-def build_corpus(emily_root: Path, mode: str, verbose: bool) -> list[dict]:
+def apples_to_records(apples_dir: Path, max_apples: int, verbose: bool) -> list[dict]:
+    """Read Apple JSON files from the APPLES git repo and produce LM records.
+
+    Apple bodies are short structured domain texts — they teach the model
+    Emily's filing format and EINHORN_INDUSTRIAL vocabulary.
+    """
+    records = []
+    json_files = sorted(apples_dir.rglob("*.json"))
+    if not json_files:
+        if verbose:
+            print(f"  apples: no JSON files found in {apples_dir}", file=sys.stderr)
+        return records
+
+    # Sort by id descending (newest first) so we get recent apples if capped
+    def apple_id(p: Path) -> int:
+        try:
+            return int(p.stem.split("_")[0])
+        except ValueError:
+            return 0
+
+    json_files = sorted(json_files, key=apple_id, reverse=True)
+    if max_apples > 0:
+        json_files = json_files[:max_apples]
+
+    skipped = 0
+    for p in json_files:
+        try:
+            apple = json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError):
+            skipped += 1
+            continue
+
+        apple_type = apple.get("apple_type", "unknown").replace("_", "-")
+        title = (apple.get("title") or "").strip()
+        body = (apple.get("body") or "").strip()
+        source = apple.get("source_repo", "")
+
+        if not title and not body:
+            skipped += 1
+            continue
+
+        # Truncate very long bodies
+        if len(body) > APPLE_MAX_BODY_CHARS:
+            body = body[:APPLE_MAX_BODY_CHARS] + " [...]"
+
+        parts = [f"Apple [{apple_type}]"]
+        if source:
+            parts[0] += f" from {source}"
+        if title:
+            parts.append(f"Title: {title}")
+        if body:
+            parts.append(f"Body: {body}")
+
+        text = "\n".join(parts)
+        if len(text.strip()) < 30:
+            skipped += 1
+            continue
+
+        records.append({"text": text, "_source": "apples"})
+
+    if verbose:
+        print(f"  apples: {len(records)} records ({skipped} skipped) from {apples_dir}")
+    return records
+
+
+def build_corpus(
+    emily_root: Path,
+    mode: str,
+    verbose: bool,
+    apples_dir: Path | None = None,
+    max_apples: int = 500,
+) -> list[dict]:
     records = []
 
     # 1. Full context doc (Tier 1 — highest signal density)
@@ -205,6 +279,14 @@ def build_corpus(emily_root: Path, mode: str, verbose: bool) -> list[dict]:
             if verbose:
                 print(f"  training-data/{jsonl_path.name}: {count} records")
 
+    # 6. Apple log from APPLES git repo (structured domain text)
+    if apples_dir and apples_dir.exists():
+        r = apples_to_records(apples_dir, max_apples, verbose)
+        records.extend(r)
+    elif apples_dir:
+        if verbose:
+            print(f"  WARNING: apples-dir not found: {apples_dir}", file=sys.stderr)
+
     return records
 
 
@@ -216,6 +298,10 @@ def main():
                         help="Output JSONL path")
     parser.add_argument("--mode", choices=["lm", "instruct"], default="lm",
                         help="lm=language modeling (text), instruct=instruction pairs (prompt+completion)")
+    parser.add_argument("--apples-dir", default=None,
+                        help="Path to APPLES git repo (auto-discover sibling of emily-root if omitted)")
+    parser.add_argument("--max-apples", type=int, default=500,
+                        help="Max Apple records to include (0=unlimited, default: 500)")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -224,10 +310,22 @@ def main():
         print(f"ERROR: EMILY root not found: {emily_root}", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-discover APPLES as sibling of EMILY if not specified
+    apples_dir: Path | None = None
+    if args.apples_dir:
+        apples_dir = Path(args.apples_dir)
+    else:
+        candidate = emily_root.parent / "APPLES"
+        if candidate.exists():
+            apples_dir = candidate
+
     if args.verbose:
         print(f"Building corpus from {emily_root} (mode={args.mode})")
+        if apples_dir:
+            print(f"  Apples dir: {apples_dir} (max {args.max_apples})")
 
-    records = build_corpus(emily_root, args.mode, args.verbose)
+    records = build_corpus(emily_root, args.mode, args.verbose,
+                           apples_dir=apples_dir, max_apples=args.max_apples)
 
     # Strip internal _source field from output
     out_path = Path(args.output)
