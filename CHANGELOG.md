@@ -1,5 +1,13 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-14 (session 2)
+
+- feat(corpus): Apple log as corpus source #6 — reads APPLES git repo JSON files; auto-discovers APPLES sibling; adds --apples-dir / --max-apples CLI flags; 321 → 327 records on live repo
+- feat(eval): scripts/eval_perplexity.py — HuggingFace perplexity eval; compare base vs fine-tuned checkpoint; per-source breakdown; preps S26-05 entropy validation
+- test: tests/test_dataset.py — 22 unit tests for chunk_text, make_lm_records, backlog_to_instruct, parse_golden_index, apples_to_records, build_corpus; all green
+- build: Makefile add 'make test' target (compile + Python tests)
+- chore: commit tokenizer.json + tokenizer_config.json (BPE tokenizer, required by C engine, previously untracked)
+
 ## 2026-06-14
 
 - feat(training): prime_directive_dataset.py — builds JSONL training corpus from Emily golden docs + prime directive + RSI task history
