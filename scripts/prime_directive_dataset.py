@@ -472,13 +472,12 @@ def main():
     records = build_corpus(emily_root, args.mode, args.verbose,
                            apples_dir=apples_dir, max_apples=args.max_apples)
 
-    # Strip internal _source field from output
+    # Write output — keep _source metadata (ignored by HuggingFace Trainer, used by corpus_stats.py)
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
         for rec in records:
-            out_rec = {k: v for k, v in rec.items() if not k.startswith("_")}
-            f.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     print(f"Wrote {len(records)} records to {out_path}")
     print(f"File size: {out_path.stat().st_size / 1024:.1f} KB")
