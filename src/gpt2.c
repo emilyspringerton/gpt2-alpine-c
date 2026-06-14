@@ -312,12 +312,23 @@ int gpt2_model_forward(gpt2_model *m, const int *tokens, int t, float *out_logit
 
 /* ── generation ──────────────────────────────────────────────────────────── */
 
-static float token_entropy(const float *probs, int n)
+/* Numerically stable entropy from raw logits (double precision, log-sum-exp).
+ * H = log(Z) - E_p[x]  where Z = sum_i exp(x_i - max_x), p_i = exp(x_i-max)/Z.
+ * Avoids float32 underflow that zeroes all non-max probs after softmax. */
+static float token_entropy_from_logits(const float *logits, int n)
 {
-    float H = 0.0f;
-    for (int i = 0; i < n; ++i)
-        if (probs[i] > 0.0f) H -= probs[i] * logf(probs[i]);
-    return H;
+    double mx = (double)logits[0];
+    for (int i = 1; i < n; ++i)
+        if ((double)logits[i] > mx) mx = (double)logits[i];
+
+    double sum_exp = 0.0, sum_wx = 0.0;
+    for (int i = 0; i < n; ++i) {
+        double e = exp((double)logits[i] - mx);
+        sum_exp += e;
+        sum_wx  += e * (double)logits[i];
+    }
+    double log_z = log(sum_exp) + mx;
+    return (float)(log_z - sum_wx / sum_exp);
 }
 
 int gpt2_generate(gpt2_model *m, int *context_tokens, int context_len,
@@ -340,11 +351,12 @@ int gpt2_generate(gpt2_model *m, int *context_tokens, int context_len,
             free(buf); free(logits); return -1;
         }
 
+        /* entropy from raw logits before softmax (numerically stable) */
+        if (entropy && entropy->per_token)
+            entropy->per_token[n] = token_entropy_from_logits(logits, V);
+
         /* greedy: argmax */
         softmax_inplace(logits, V);
-
-        if (entropy && entropy->per_token)
-            entropy->per_token[n] = token_entropy(logits, V);
 
         int best = 0;
         float best_v = logits[0];

@@ -1,5 +1,9 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-14 (session 7 — entropy fix + smoke test)
+- fix(gpt2.c): token_entropy_from_logits() — log-sum-exp in double before softmax; base H_mean=4.49 nats, H_max=8.62 nats (was 0.0 due to float32 underflow of non-max probs). Apple #519.
+- feat(train_local): --steps 20 --max-length 32 --lora-r 4 smoke test validates pipeline end-to-end on CPU before Colab GPU run
+
 ## 2026-06-14 (session 6 — colab preset + deduplication)
 - feat(corpus): --colab preset in prime_directive_dataset.py — Emily operational text only (no SEC/press/TYLER raw crawl), deduped, max 1500 records; produces 466 records / 154k tokens / 2.2 min T4 (was 7184 records / 32M tokens / 469 min)
 - feat(corpus): hash-based deduplication (--dedupe / --no-dedupe; default on)
