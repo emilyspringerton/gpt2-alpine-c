@@ -1,6 +1,7 @@
 # gpt2-alpine-c Changelog
 
 ## 2026-06-15
+- config/broker-routes.json — FatBaby broker routes for GPT-2 proxy on :8679 (tenant emily-prime, upstream :8088)
 
 - S26: GPT-2 inference API (:8088) + --prompt C CLI + tokenizer binary builder
 
