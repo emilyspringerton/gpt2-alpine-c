@@ -10,9 +10,37 @@ C inference engine + GPT-2 fine-tuning pipeline for Emily Prime.
 ## Build
 
 ```bash
-make                   # → ./gpt2_run
-make docker            # builds Alpine container
-./gpt2_run weights/model.bin --entropy-stats   # test entropy output
+make                        # → ./gpt2_run (C inference binary)
+make tokenizer              # → weights/tokenizer.bin (required for --prompt mode)
+make docker                 # builds Alpine container
+
+# Text prompt generation (requires tokenizer.bin):
+./gpt2_run weights/emily-ft.bin --prompt "Emily Prime:" --tokens 50
+
+# Entropy stats only (no tokenizer needed):
+./gpt2_run weights/emily-ft.bin --entropy-stats
+```
+
+## Inference API Server
+
+```bash
+# Start the HTTP inference server (loads checkpoint once, keeps in memory):
+python3 scripts/serve.py                     # fine-tuned model on :8088 (default)
+python3 scripts/serve.py --model base        # base GPT-2
+python3 scripts/serve.py --port 8089         # custom port
+
+# Health check:
+curl http://localhost:8088/health
+
+# Generate:
+curl -X POST http://localhost:8088/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Emily Prime:", "max_tokens": 100, "temperature": 0.8}'
+
+# Via emily-agent proxy (requires emily-agent running on :8086):
+curl -X POST http://localhost:8086/api/v1/gpt2/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Emily Prime:", "max_tokens": 100}'
 ```
 
 ## Training Pipeline (sequential steps)
@@ -58,8 +86,11 @@ IDUNA_AGENT_SECRET  — agent secret (from IDUNA var/agent-secrets.env)
 | `notebooks/gpt2_finetune_colab.ipynb` | Colab fine-tuning notebook (run on GPU) |
 | `convert_checkpoint.py` | Existing: HF gpt2 base → binary (not fine-tuned) |
 | `src/gpt2.c` | Transformer forward pass |
-| `src/main.c` | CLI: generate + entropy stats |
+| `src/main.c` | CLI: generate + entropy stats + `--prompt` text mode |
+| `scripts/build_tokenizer_bin.py` | Convert tokenizer.json → tokenizer.bin (C binary format) |
+| `scripts/serve.py` | HTTP inference server (:8088) — loads HF checkpoint, serves /generate |
 | `weights/model.bin` | GPT-2 base weights (binary) |
+| `weights/tokenizer.bin` | Binary tokenizer (gitignored; `make tokenizer` to rebuild) |
 
 ## CHANGELOG Protocol
 

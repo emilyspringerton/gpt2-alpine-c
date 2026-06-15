@@ -9,6 +9,7 @@ static void usage(const char *prog)
     fprintf(stderr,
         "Usage: %s <weights.bin> [options] [seed_token_ids...]\n"
         "Options:\n"
+        "  --prompt TEXT    encode TEXT as context and decode output as text\n"
         "  --tokens N       generate N tokens (default 64)\n"
         "  --entropy        print per-token entropy (nats) after generation\n"
         "  --entropy-stats  print mean/max entropy and exit (no text output)\n",
@@ -20,9 +21,10 @@ int main(int argc, char **argv)
     if (argc < 2) { usage(argv[0]); return 1; }
 
     const char *weights_path = argv[1];
-    int max_tokens  = 64;
-    int do_entropy  = 0;
-    int only_stats  = 0;
+    int max_tokens    = 64;
+    int do_entropy    = 0;
+    int only_stats    = 0;
+    const char *prompt = NULL;
 
     int context[1024];
     int context_len = 0;
@@ -30,6 +32,8 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) {
             max_tokens = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc) {
+            prompt = argv[++i];
         } else if (strcmp(argv[i], "--entropy") == 0) {
             do_entropy = 1;
         } else if (strcmp(argv[i], "--entropy-stats") == 0) {
@@ -39,6 +43,25 @@ int main(int argc, char **argv)
             /* treat as token id */
             int tok = atoi(argv[i]);
             if (context_len < 1024) context[context_len++] = tok;
+        }
+    }
+
+    /* Load tokenizer when using --prompt (weights dir inferred from weights path) */
+    int use_text = (prompt != NULL);
+    if (use_text) {
+        /* tokenizer.json lives next to the weights file */
+        char tok_path[1024];
+        const char *slash = strrchr(weights_path, '/');
+        if (slash) {
+            int dir_len = (int)(slash - weights_path);
+            snprintf(tok_path, sizeof(tok_path), "%.*s/tokenizer.bin", dir_len, weights_path);
+        } else {
+            snprintf(tok_path, sizeof(tok_path), "weights/tokenizer.bin");
+        }
+        tokenizer_load(tok_path);
+        gpt2_encode(prompt, context, &context_len);
+        if (context_len == 0) {
+            context[context_len++] = 50256; /* fallback: endoftext */
         }
     }
 
@@ -70,9 +93,14 @@ int main(int argc, char **argv)
     }
 
     if (!only_stats) {
-        printf("Generated %d tokens:\n", n);
-        for (int i = 0; i < n; ++i) printf("%d ", out_tokens[i]);
-        printf("\n");
+        if (use_text) {
+            char *text = gpt2_decode(out_tokens, n);
+            if (text) { printf("%s\n", text); free(text); }
+        } else {
+            printf("Generated %d tokens:\n", n);
+            for (int i = 0; i < n; ++i) printf("%d ", out_tokens[i]);
+            printf("\n");
+        }
     }
 
     if (do_entropy && ent_buf) {
@@ -95,6 +123,7 @@ int main(int argc, char **argv)
     }
 
     gpt2_model_free(m);
+    if (use_text) tokenizer_free();
     free(out_tokens);
     free(ent_buf);
     return 0;

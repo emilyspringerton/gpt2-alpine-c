@@ -13,6 +13,11 @@ all: $(BIN)
 $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
+weights/tokenizer.bin: weights/tokenizer.json scripts/build_tokenizer_bin.py
+	python3 scripts/build_tokenizer_bin.py
+
+tokenizer: weights/tokenizer.bin
+
 test: $(BIN)
 	@bash tests/test_compile.sh
 	@python3 -m pytest tests/test_dataset.py -v 2>/dev/null || python3 tests/test_dataset.py
@@ -20,4 +25,4 @@ test: $(BIN)
 clean:
 	rm -f $(OBJ) $(BIN)
 
-.PHONY: all clean test
+.PHONY: all clean test tokenizer
