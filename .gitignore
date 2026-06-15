@@ -4,3 +4,6 @@ gpt2_run
 __pycache__/
 *.pyc
 downloads/
+
+checkpoint-emily-ft/
+checkpoint-*/
