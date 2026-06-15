@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "tenant_id": "emily-prime",
+      "tenant_key": "emily-gpt2-local",
+      "upstream_base": "http://localhost:8088",
+      "upstream_key": "",
+      "strip_headers": ["Authorization"],
+      "inject_headers": {},
+      "allowed_paths": ["/generate", "/health"],
+      "max_body_bytes": 1048576,
+      "enabled": true
+    }
+  ]
+}
