@@ -1,5 +1,10 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-15
+
+- S26: GPT-2 inference API (:8088) + --prompt C CLI + tokenizer binary builder
+
+
 ## 2026-06-14 (session 7 — entropy fix + smoke test)
 - fix(gpt2.c): token_entropy_from_logits() — log-sum-exp in double before softmax; base H_mean=4.49 nats, H_max=8.62 nats (was 0.0 due to float32 underflow of non-max probs). Apple #519.
 - feat(train_local): 20-step CPU smoke test validates end-to-end pipeline: build-dataset → train → convert → entropy. Loss 6.40→5.73. Fine-tuned H_mean=4.66 vs base 4.49 (+0.17 nats). Apple #520. Checkpoint: checkpoint-emily-ft/. Binary: weights/emily-ft.bin.
