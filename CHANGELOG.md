@@ -1,5 +1,10 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-16
+
+- Git LFS: emily-ft.bin + model.bin + checkpoint-emily-ft/model.safetensors now tracked via LFS and pushed (Apple #589)
+
+
 ## 2026-06-15
 - config/broker-routes.json — FatBaby broker routes for GPT-2 proxy on :8679 (tenant emily-prime, upstream :8088)
 
