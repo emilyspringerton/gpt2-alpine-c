@@ -11,3 +11,6 @@ downloads/
 # Intermediate training checkpoints (not the final fine-tune)
 checkpoint-*/
 !checkpoint-emily-ft/
+
+# Training run logs
+var/train-*.log
