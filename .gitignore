@@ -1,9 +1,13 @@
-weights/*.bin
 gpt2_run
 *.o
 __pycache__/
 *.pyc
 downloads/
 
-checkpoint-emily-ft/
+# Base model weights — too large for git, tracked via LFS instead
+# weights/model.bin  (tracked via LFS)
+# weights/emily-ft.bin  (tracked via LFS)
+
+# Intermediate training checkpoints (not the final fine-tune)
 checkpoint-*/
+!checkpoint-emily-ft/
