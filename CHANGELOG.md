@@ -1,6 +1,7 @@
 # gpt2-alpine-c Changelog
 
 ## 2026-06-18
+- feat(game-ai): S39-03 --game-replays flag in prime_directive_dataset.py + build_game_corpus.py standalone aggregator; replay NDJSON → instruction pairs {prompt:state, completion:action} (Apple #1405)
 - feat(game-ai): S39-01 game state serializer + action decoder — serialize_snapshot() PacketSnapshot→token string, decode_action() token string→UserCmd dict, encode_action() for replay logging; 14 unit tests pass (Apple #1401)
 
 - docs(game-ai): GAME_AI_NORTHSTAR.md — GPT-2 as game policy network; 6-milestone track (state serializer → replay logger → fine-tune → GPT-2 policy → self-play → BedWars MOBA AI); NORTHSTAR.md Track 2 added (Apple #1264)
