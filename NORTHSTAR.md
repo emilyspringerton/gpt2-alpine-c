@@ -109,6 +109,30 @@ creative; low entropy = more deterministic.
 
 ---
 
+---
+
+## Track 2: Game AI (GPT-2 as Policy Network)
+
+Full spec: `docs/GAME_AI_NORTHSTAR.md`
+
+GPT-2's token generation maps directly onto sequential game decisions: encode game state as
+natural language tokens, generate action tokens, decode to game inputs. The testbed is
+SHANKPIT (emily-bot as policy host); the MOBA-scale target is BedWars.
+
+| Milestone | Status | Description |
+|-----------|--------|-------------|
+| 6: State serializer + action decoder | NOT STARTED | `scripts/game_state.py` — SHANKPIT snapshot → token string → UserCmd |
+| 7: Replay logger in emily-bot | NOT STARTED | Log (state, action) NDJSON per tick; `scripts/build_game_corpus.py` |
+| 8: Fine-tune on replay corpus | NOT STARTED | `--game-replays` flag in dataset builder; Colab fine-tune |
+| 9: GPT-2 policy in emily-bot | NOT STARTED | Replace heuristic `think()` with inference server call |
+| 10: Self-play loop | NOT STARTED | 4 bots play → replay data → re-fine-tune → next generation |
+| 11: BedWars AI | NOT STARTED | MOBA-scale state/action vocabulary; strategic decisions (economy, objectives) |
+
+**The "our own League of Legends" milestone is M11.** BedWars has the same strategic primitives
+as a MOBA: economy, objectives, team elimination, map control. The architecture paper writes itself.
+
+---
+
 ## Related Repos
 
 | Repo | Relationship |
@@ -116,3 +140,4 @@ creative; low entropy = more deterministic.
 | `EMILY` | Training data source; prime directive + golden docs + RSI task history |
 | `IDUNA` | Drive API for artifact sync (upload datasets, download checkpoints) |
 | `PRRJECT_FATBABY` | Domain text source (governance signals, Apple bodies) |
+| `SHANKPIT` | Game testbed; emily-bot hosts the GPT-2 policy; BedWars is the MOBA-scale target |
