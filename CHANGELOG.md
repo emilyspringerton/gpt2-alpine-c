@@ -1,5 +1,10 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-18
+
+- docs(game-ai): GAME_AI_NORTHSTAR.md — GPT-2 as game policy network; 6-milestone track (state serializer → replay logger → fine-tune → GPT-2 policy → self-play → BedWars MOBA AI); NORTHSTAR.md Track 2 added (Apple #1264)
+
+
 ## 2026-06-16
 
 - Git LFS: emily-ft.bin + model.bin + checkpoint-emily-ft/model.safetensors now tracked via LFS and pushed (Apple #589)
