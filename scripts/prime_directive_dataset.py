@@ -622,6 +622,38 @@ def stratified_sample(records: list[dict], max_records: int) -> list[dict]:
     return sampled
 
 
+def load_game_replays(replay_dir: "Path", max_records: int = 0, verbose: bool = False) -> list:
+    """Load SHANKPIT replay NDJSON files as instruction pairs {prompt, completion, _source}."""
+    from pathlib import Path as _Path
+    records = []
+    ndjson_files = sorted(_Path(replay_dir).glob("*.ndjson"))
+    for fpath in ndjson_files:
+        with fpath.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    state = rec.get("state", "")
+                    action = rec.get("action", "")
+                    if state and action:
+                        records.append({
+                            "prompt": state,
+                            "completion": action,
+                            "_source": "game_replay",
+                        })
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        if max_records > 0 and len(records) >= max_records:
+            break
+    if max_records > 0:
+        records = records[:max_records]
+    if verbose:
+        print(f"  [game_replay] loaded {len(records)} pairs from {len(ndjson_files)} file(s)")
+    return records
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build GPT-2 training corpus from Emily golden docs")
     parser.add_argument("--emily-root", default="/home/fatbaby/EMILY",
@@ -660,6 +692,10 @@ def main():
     parser.add_argument("--colab", action="store_true",
                         help="Colab-safe preset: Emily operational text only, deduped, max 1500 records."
                              " Implies: --no-sec --no-press-releases --no-tyler --max-apples 200 --max-records 1500")
+    parser.add_argument("--game-replays", default=None,
+                        help="Directory of SHANKPIT replay NDJSON files to include as game instruction pairs")
+    parser.add_argument("--max-game-records", type=int, default=0,
+                        help="Cap game replay records (0=unlimited, default 0)")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -732,6 +768,13 @@ def main():
         max_pr_docs=args.max_pr_docs,
         tyler_root=tyler_root,
     )
+
+    # Game replay pairs (30% of total when mixed corpus)
+    if args.game_replays:
+        game_records = load_game_replays(Path(args.game_replays), args.max_game_records, args.verbose)
+        records.extend(game_records)
+        if args.verbose:
+            print(f"  Game replays: {len(game_records)} instruction pairs from {args.game_replays}")
 
     # Deduplication
     if args.dedupe:
