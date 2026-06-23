@@ -1,6 +1,7 @@
 # gpt2-alpine-c Changelog
 
 ## 2026-06-23
+- S26-05: entropy validation — base H_mean=4.4877 vs emily-ft H_mean=4.6602 (+0.17 nats); NORTHSTAR milestone 3 updated; target ≥0.5 nats requires Colab T4 full fine-tune
 
 - feat: local LoRA fine-tune round 2026-06-23 — 20 steps, loss 5.336→4.724, 1036 corpus records, checkpoint-emily-ft saved
 
