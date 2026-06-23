@@ -90,7 +90,7 @@ The corpus teaches the model:
 | 1: Training tooling | DONE | Dataset builder, Drive sync, Colab notebook, FT converter |
 | 1.5: Corpus quality | DONE | Colab preset (466 records/2.2 min T4), deduplication, stats tool, 28 unit tests |
 | 2: Prime directive fine-tune | PENDING (manual) | Run notebooks/gpt2_finetune_colab.ipynb on Colab T4 GPU with Colab corpus |
-| 3: Checkpoint validation | NOT STARTED | Run fine-tuned model through gpt2_run; validate entropy |
+| 3: Checkpoint validation | DONE | Base: H_mean=4.4877 nats. Fine-tuned (emily-ft.bin): H_mean=4.6602 nats (+0.17). Target ≥0.5 not met — Colab T4 full fine-tune required. |
 | 4: Emily domain vocabulary | NOT STARTED | Compare PPL base (116.76) vs fine-tuned on same eval set |
 | 5: Emily Prime deployment | NOT STARTED | Replace haiku calls with local model for routine classification |
 
@@ -100,7 +100,11 @@ The corpus teaches the model:
 
 ```bash
 ./gpt2_run weights/model.bin --entropy-stats
-# → entropy_mean_nats: 3.42, entropy_max_nats: 7.81
+# → entropy_mean_nats=4.4877 entropy_max_nats=8.6231 tokens=64  (base GPT-2, 2026-06-23)
+
+./gpt2_run weights/emily-ft.bin --entropy-stats
+# → entropy_mean_nats=4.6602 entropy_max_nats=8.6346 tokens=64  (emily-ft 300-step, 2026-06-23)
+# delta: +0.17 nats (target ≥0.5 — full Colab T4 run required to meet target)
 ```
 
 Emily's RSI loop uses the model's per-token entropy as a signal for creative
