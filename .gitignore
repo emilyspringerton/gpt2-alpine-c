@@ -14,3 +14,4 @@ checkpoint-*/
 
 # Training run logs
 var/train-*.log
+weights/emily-ft-20260623.bin

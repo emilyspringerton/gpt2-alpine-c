@@ -1,5 +1,10 @@
 # gpt2-alpine-c Changelog
 
+## 2026-06-23
+
+- feat: local LoRA fine-tune round 2026-06-23 — 20 steps, loss 5.336→4.724, 1036 corpus records, checkpoint-emily-ft saved
+
+
 ## 2026-06-18
 - feat(game-ai): S39-03 --game-replays flag in prime_directive_dataset.py + build_game_corpus.py standalone aggregator; replay NDJSON → instruction pairs {prompt:state, completion:action} (Apple #1405)
 - feat(game-ai): S39-01 game state serializer + action decoder — serialize_snapshot() PacketSnapshot→token string, decode_action() token string→UserCmd dict, encode_action() for replay logging; 14 unit tests pass (Apple #1401)
