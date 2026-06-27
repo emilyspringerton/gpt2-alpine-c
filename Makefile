@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -O2 -std=c11 -Wall -Wextra -Isrc
 LDFLAGS = -lm
-SRC = src/gpt2.c src/checkpoint_loader.c src/tokenizer.c src/main.c
+SRC = src/gpt2.c src/checkpoint_loader.c src/tokenizer.c src/archetype.c src/main.c
 OBJ = $(SRC:.c=.o)
 BIN = gpt2_run
 
