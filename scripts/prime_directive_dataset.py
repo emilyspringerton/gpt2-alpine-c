@@ -16,10 +16,13 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 GOLDEN_INDEX_PATH = "context/golden-docs-index.md"
@@ -434,6 +437,215 @@ def press_releases_to_records(fatbaby_root: Path, max_docs: int, verbose: bool) 
     return records
 
 
+def eps_headlines_to_records(fatbaby_root: Path, verbose: bool) -> list[dict]:
+    """S146-02: EPS headline records for FABLE E0 (HQ-SPEC-AI-103 §3's flagship task).
+
+    Reads var/eps/articles.ndjson (raw PR-derived EPS extractions) joined against
+    var/eps/oracle.ndjson (eps-reconciler's confirm/contradict verdicts) by
+    source_identity. One record per article, never chunked -- record identity is
+    what provenance hangs on (chunking, as sec_filings_to_records/
+    press_releases_to_records do, would sever the article from its oracle verdict).
+
+    Verdict gating (Löbian rule 1, HQ-SPEC-AI-103 §5.1): only "confirmed" cases are
+    FABLE-eligible -- pending/contradicted cases are excluded and counted, never
+    silently dropped without a number attached.
+    """
+    records: list[dict] = []
+    articles_path = fatbaby_root / "var" / "eps" / "articles.ndjson"
+    oracle_path = fatbaby_root / "var" / "eps" / "oracle.ndjson"
+    if not articles_path.exists() or not oracle_path.exists():
+        if verbose:
+            print(f"  eps-headlines: articles/oracle store not found under {fatbaby_root / 'var' / 'eps'}",
+                  file=sys.stderr)
+        return records
+
+    # oracle.ndjson: last verdict per source_identity wins (a case can be
+    # re-reconciled; the store is append-only, so later lines supersede).
+    oracle_by_identity: dict[str, dict] = {}
+    with oracle_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                case = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            sid = case.get("source_identity")
+            if sid:
+                oracle_by_identity[sid] = case
+
+    confirmed = 0
+    excluded_pending = 0
+    excluded_contradicted = 0
+    skipped_no_oracle = 0
+    with articles_path.open() as f:
+        for raw_line in f:
+            raw_line_stripped = raw_line.strip()
+            if not raw_line_stripped:
+                continue
+            try:
+                article = json.loads(raw_line_stripped)
+            except json.JSONDecodeError:
+                continue
+
+            sid = article.get("source_identity")
+            case = oracle_by_identity.get(sid) if sid else None
+            if case is None:
+                skipped_no_oracle += 1
+                continue
+
+            verdict = case.get("verdict", "pending")
+            if verdict == "pending":
+                excluded_pending += 1
+                continue
+            if verdict == "contradicted":
+                excluded_contradicted += 1
+                continue
+            if verdict != "confirmed":
+                # Unknown verdict value -- fail closed (not FABLE-eligible), don't
+                # silently include it either.
+                excluded_pending += 1
+                continue
+
+            headline = (article.get("headline") or "").strip()
+            dek = (article.get("dek") or "").strip()
+            body = (article.get("body") or "").strip()
+            text = "\n".join(p for p in (headline, dek, body) if p)
+            if not text:
+                continue
+
+            source_event_hash = hashlib.sha256(raw_line_stripped.encode("utf-8")).hexdigest()
+            period = article.get("period") or {}
+
+            records.append({
+                "text": text,
+                "_source": "eps-headlines",
+                "_provenance": {
+                    "source_event_hash": source_event_hash,
+                    "source_identity": sid,
+                    "oracle_case_id": case.get("case_id"),
+                    "verdict": verdict,
+                    "extracted_eps": case.get("extracted_eps"),
+                    "filed_eps": case.get("filed_eps"),
+                    "ticker": article.get("ticker", ""),
+                    "period": period,
+                    "label_date": case.get("recorded_at") or article.get("publish_at"),
+                    "license_class": "own-exhaust",
+                },
+            })
+            confirmed += 1
+
+    if verbose:
+        print(f"  eps-headlines: {confirmed} confirmed records "
+              f"({excluded_pending} pending, {excluded_contradicted} contradicted, "
+              f"{skipped_no_oracle} no oracle case -- all excluded, not silently dropped)")
+    return records
+
+
+def load_eval_tombstones(gpt2_root: Path, verbose: bool) -> tuple[set[str], str]:
+    """S146-04: load the eval contamination tombstone list.
+
+    Returns (set of tombstoned source_event_hash values, hash of the tombstone
+    list itself for the snapshot manifest). Missing file is not an error --
+    S145-02 (fableeval freeze) hasn't run yet in a fresh checkout, so an empty
+    tombstone set with a stable empty-list hash is the correct default, not a
+    warning-worthy gap.
+    """
+    path = gpt2_root / "var" / "eval-tombstones.json"
+    if not path.exists():
+        empty_hash = hashlib.sha256(b"[]").hexdigest()
+        return set(), empty_hash
+    raw = path.read_text()
+    entries = json.loads(raw)
+    hashes = {e["sha256"] for e in entries if "sha256" in e}
+    list_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    if verbose:
+        print(f"  eval-tombstones: {len(hashes)} frozen hashes loaded from {path}")
+    return hashes, list_hash
+
+
+def apply_tombstones(records: list[dict], tombstones: set[str], verbose: bool) -> list[dict]:
+    """Drop any record whose source_event_hash is in the tombstone set.
+
+    Applied after generation, before dedupe/write, per HQ-SPEC-AI-103 §8 step 2:
+    the eval suite must be excluded from training data, mechanically, by hash --
+    not by hoping the eval and training splits never overlap by construction.
+    """
+    if not tombstones:
+        return records
+    kept = []
+    removed = 0
+    for rec in records:
+        h = (rec.get("_provenance") or {}).get("source_event_hash")
+        if h and h in tombstones:
+            removed += 1
+            continue
+        kept.append(rec)
+    if verbose and removed:
+        print(f"  eval-tombstones: removed {removed} record(s) present in the frozen eval suite")
+    return kept
+
+
+def _git_rev(repo_dir: Path) -> str:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        return out.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def write_snapshot(records: list[dict], gpt2_root: Path, cli_args: list[str], tombstone_list_hash: str,
+                    verbose: bool) -> Path:
+    """S146-01: write an immutable, content-addressed snapshot pair.
+
+    gpt2-alpine-c/var/snapshots/eps-<date>-<shorthash>.{jsonl,manifest.json}.
+    snapshot_id = sha256 over the sorted list of per-record source_event_hash
+    values -- this is the contract Go `fabledata` inherits (HQ-SPEC-AI-103 §4a)
+    once it's built; this Python writer defines the format first.
+    """
+    snapshots_dir = gpt2_root / "var" / "snapshots"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+
+    record_hashes = sorted(
+        h for h in ((r.get("_provenance") or {}).get("source_event_hash") for r in records) if h
+    )
+    if not record_hashes:
+        # No provenance-bearing records (e.g. an empty EPS oracle) -- hash the
+        # empty set rather than refuse to snapshot. An empty snapshot is a
+        # legitimate, honest state, not an error.
+        pass
+    snapshot_id = hashlib.sha256("".join(record_hashes).encode("utf-8")).hexdigest()
+    short_hash = snapshot_id[:12]
+    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    base_name = f"eps-{date_str}-{short_hash}"
+    jsonl_path = snapshots_dir / f"{base_name}.jsonl"
+    manifest_path = snapshots_dir / f"{base_name}.manifest.json"
+
+    with jsonl_path.open("w") as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    manifest = {
+        "snapshot_id": snapshot_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "record_count": len(records),
+        "builder_git_rev": _git_rev(gpt2_root),
+        "builder_args": cli_args,
+        "tombstone_list_hash": tombstone_list_hash,
+        "jsonl_file": jsonl_path.name,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+    if verbose:
+        print(f"  snapshot: {jsonl_path} ({len(records)} records, snapshot_id={short_hash})")
+    return jsonl_path
+
+
 TYLER_DIRS = ["episodes", "lore", "engine", "characters", "manuscripts", "memos", "outlines"]
 TYLER_ROOT_FILES = ["README.md", "universe_engine.md", "THE_FIELD.md", "CITY_OF_LIGHT.md"]
 
@@ -692,6 +904,17 @@ def main():
     parser.add_argument("--colab", action="store_true",
                         help="Colab-safe preset: Emily operational text only, deduped, max 1500 records."
                              " Implies: --no-sec --no-press-releases --no-tyler --max-apples 200 --max-records 1500")
+    parser.add_argument("--fable-eps", action="store_true",
+                        help="S146-03: EPS-headline-only preset for FABLE E0 (HQ-SPEC-AI-103). "
+                             "Track B -- confirmed-verdict EPS records only, no golden docs / TYLER / "
+                             "Apples / chunked SEC text. Implies --snapshot. Requires --fatbaby-root.")
+    parser.add_argument("--snapshot", action="store_true",
+                        help="S146-01: write an immutable, content-addressed snapshot pair "
+                             "(var/snapshots/eps-<date>-<hash>.jsonl + .manifest.json) instead of "
+                             "(in addition to, if --output is also given) the plain --output write.")
+    parser.add_argument("--gpt2-root", default=None,
+                        help="Path to gpt2-alpine-c repo root (default: this script's repo). "
+                             "Used for --snapshot output and --fable-eps tombstone loading.")
     parser.add_argument("--game-replays", default=None,
                         help="Directory of SHANKPIT replay NDJSON files to include as game instruction pairs")
     parser.add_argument("--max-game-records", type=int, default=0,
@@ -709,6 +932,14 @@ def main():
             args.max_apples = 200
         if args.max_records == 0:
             args.max_records = 1500
+
+    if args.fable_eps:
+        args.snapshot = True
+        if not args.fatbaby_root:
+            print("ERROR: --fable-eps requires --fatbaby-root (var/eps/ lives there)", file=sys.stderr)
+            sys.exit(1)
+
+    gpt2_root = Path(args.gpt2_root) if args.gpt2_root else Path(__file__).resolve().parent.parent
 
     emily_root = Path(args.emily_root)
     if not emily_root.exists():
@@ -742,7 +973,7 @@ def main():
     if args.no_tyler:
         tyler_root = None
 
-    if args.verbose:
+    if args.verbose and not args.fable_eps:
         preset = " [--colab preset]" if args.colab else ""
         print(f"Building corpus from {emily_root} (mode={args.mode}){preset}")
         if apples_dir:
@@ -760,17 +991,25 @@ def main():
         if args.max_records > 0:
             print(f"  Max records:  {args.max_records} (stratified)")
 
-    records = build_corpus(
-        emily_root, args.mode, args.verbose,
-        apples_dir=apples_dir, max_apples=args.max_apples,
-        fatbaby_root=fatbaby_root,
-        max_sec_docs=args.max_sec_docs,
-        max_pr_docs=args.max_pr_docs,
-        tyler_root=tyler_root,
-    )
+    if args.fable_eps:
+        # Track B (S146-03): EPS-headline records only. Bypasses build_corpus
+        # entirely -- golden docs / TYLER / Apples / chunked SEC text are all
+        # out of scope for this preset by design, not by exclusion flags.
+        if args.verbose:
+            print(f"Building --fable-eps snapshot from {fatbaby_root}")
+        records = eps_headlines_to_records(fatbaby_root, args.verbose)
+    else:
+        records = build_corpus(
+            emily_root, args.mode, args.verbose,
+            apples_dir=apples_dir, max_apples=args.max_apples,
+            fatbaby_root=fatbaby_root,
+            max_sec_docs=args.max_sec_docs,
+            max_pr_docs=args.max_pr_docs,
+            tyler_root=tyler_root,
+        )
 
     # Game replay pairs (30% of total when mixed corpus)
-    if args.game_replays:
+    if args.game_replays and not args.fable_eps:
         game_records = load_game_replays(Path(args.game_replays), args.max_game_records, args.verbose)
         records.extend(game_records)
         if args.verbose:
@@ -782,12 +1021,21 @@ def main():
         if args.verbose and n_removed:
             print(f"  Deduplication: removed {n_removed} duplicates → {len(records)} records")
 
+    # S146-04: eval contamination tombstoning — after generation/dedupe, before write.
+    tombstones, tombstone_list_hash = load_eval_tombstones(gpt2_root, args.verbose)
+    records = apply_tombstones(records, tombstones, args.verbose)
+
     # Stratified cap
     if args.max_records > 0 and len(records) > args.max_records:
         before = len(records)
         records = stratified_sample(records, args.max_records)
         if args.verbose:
             print(f"  Capped: {before} → {len(records)} records (stratified)")
+
+    if args.snapshot:
+        # S146-01: immutable, content-addressed snapshot — the contract Go
+        # fabledata inherits once it exists (HQ-SPEC-AI-103 §4a).
+        write_snapshot(records, gpt2_root, sys.argv[1:], tombstone_list_hash, args.verbose)
 
     # Write output — keep _source metadata (ignored by HuggingFace Trainer, used by corpus_stats.py)
     out_path = Path(args.output)

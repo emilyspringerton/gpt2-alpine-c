@@ -6,6 +6,7 @@ Run with: python3 -m pytest tests/test_dataset.py -v
      or:  python3 tests/test_dataset.py
 """
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -18,12 +19,16 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from prime_directive_dataset import (
     apples_to_records,
+    apply_tombstones,
     backlog_to_instruct,
     build_corpus,
     chunk_text,
+    eps_headlines_to_records,
+    load_eval_tombstones,
     make_lm_records,
     parse_golden_index,
     prime_directive_to_instruct,
+    write_snapshot,
 )
 
 
@@ -324,6 +329,157 @@ class TestBuildCorpus(unittest.TestCase):
                 for line in f:
                     obj = json.loads(line)
                     self.assertIn("text", obj)
+
+
+class TestEpsHeadlinesToRecords(unittest.TestCase):
+    def _write_ndjson(self, path: Path, lines: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as f:
+            for obj in lines:
+                f.write(json.dumps(obj) + "\n")
+
+    def test_missing_store_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = eps_headlines_to_records(Path(tmp), verbose=False)
+            self.assertEqual(records, [])
+
+    def test_confirmed_case_included_with_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fatbaby_root = Path(tmp)
+            article = {
+                "source_identity": "pr:1", "ticker": "AAPL",
+                "headline": "Apple reports Q3 EPS of $1.50", "dek": "GAAP diluted EPS: $1.50",
+                "body": "Period: Q3 2026", "period": {"fiscal_quarter": "Q3", "fiscal_year": 2026},
+                "eps_value": 1.5, "publish_at": "2026-07-01T00:00:00Z",
+            }
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "articles.ndjson", [article])
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "oracle.ndjson", [{
+                "case_id": "eps:abc", "source_identity": "pr:1", "ticker": "AAPL",
+                "extracted_eps": 1.5, "filed_eps": 1.5, "verdict": "confirmed",
+                "recorded_at": "2026-07-02",
+            }])
+
+            records = eps_headlines_to_records(fatbaby_root, verbose=False)
+            self.assertEqual(len(records), 1)
+            rec = records[0]
+            self.assertEqual(rec["_source"], "eps-headlines")
+            self.assertIn("Apple reports Q3 EPS", rec["text"])
+            prov = rec["_provenance"]
+            self.assertEqual(prov["oracle_case_id"], "eps:abc")
+            self.assertEqual(prov["verdict"], "confirmed")
+            self.assertEqual(prov["license_class"], "own-exhaust")
+            self.assertTrue(len(prov["source_event_hash"]) == 64)  # sha256 hex
+
+    def test_pending_and_contradicted_excluded_not_dropped_silently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fatbaby_root = Path(tmp)
+            articles = [
+                {"source_identity": "pr:1", "headline": "H1", "ticker": "A"},
+                {"source_identity": "pr:2", "headline": "H2", "ticker": "B"},
+                {"source_identity": "pr:3", "headline": "H3", "ticker": "C"},
+            ]
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "articles.ndjson", articles)
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "oracle.ndjson", [
+                {"case_id": "1", "source_identity": "pr:1", "verdict": "pending"},
+                {"case_id": "2", "source_identity": "pr:2", "verdict": "contradicted"},
+                {"case_id": "3", "source_identity": "pr:3", "verdict": "confirmed"},
+            ])
+            records = eps_headlines_to_records(fatbaby_root, verbose=False)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["_provenance"]["oracle_case_id"], "3")
+
+    def test_article_without_oracle_case_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fatbaby_root = Path(tmp)
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "articles.ndjson",
+                                [{"source_identity": "pr:orphan", "headline": "H"}])
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "oracle.ndjson", [])
+            records = eps_headlines_to_records(fatbaby_root, verbose=False)
+            self.assertEqual(records, [])
+
+    def test_never_chunked_even_if_long(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fatbaby_root = Path(tmp)
+            long_body = "word " * 2000  # far exceeds CHUNK_SIZE
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "articles.ndjson",
+                                [{"source_identity": "pr:1", "headline": "H", "body": long_body}])
+            self._write_ndjson(fatbaby_root / "var" / "eps" / "oracle.ndjson",
+                                [{"case_id": "1", "source_identity": "pr:1", "verdict": "confirmed"}])
+            records = eps_headlines_to_records(fatbaby_root, verbose=False)
+            self.assertEqual(len(records), 1)  # one record, not chunked into many
+
+
+class TestEvalTombstones(unittest.TestCase):
+    def test_missing_file_returns_empty_set_stable_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hashes, list_hash = load_eval_tombstones(Path(tmp), verbose=False)
+            self.assertEqual(hashes, set())
+            self.assertEqual(list_hash, hashlib.sha256(b"[]").hexdigest())
+
+    def test_loads_hashes_from_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gpt2_root = Path(tmp)
+            (gpt2_root / "var").mkdir()
+            entries = [{"sha256": "abc123", "suite": "eps-v1", "frozen_at": "2026-07-16"}]
+            (gpt2_root / "var" / "eval-tombstones.json").write_text(json.dumps(entries))
+            hashes, list_hash = load_eval_tombstones(gpt2_root, verbose=False)
+            self.assertEqual(hashes, {"abc123"})
+            self.assertNotEqual(list_hash, hashlib.sha256(b"[]").hexdigest())
+
+    def test_apply_tombstones_removes_matching_records(self):
+        records = [
+            {"text": "keep", "_provenance": {"source_event_hash": "keep-hash"}},
+            {"text": "drop", "_provenance": {"source_event_hash": "drop-hash"}},
+            {"text": "no-provenance"},
+        ]
+        result = apply_tombstones(records, {"drop-hash"}, verbose=False)
+        self.assertEqual(len(result), 2)
+        self.assertEqual([r["text"] for r in result], ["keep", "no-provenance"])
+
+    def test_apply_tombstones_noop_on_empty_set(self):
+        records = [{"text": "a"}, {"text": "b"}]
+        result = apply_tombstones(records, set(), verbose=False)
+        self.assertEqual(result, records)
+
+
+class TestWriteSnapshot(unittest.TestCase):
+    def test_writes_jsonl_and_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gpt2_root = Path(tmp)
+            records = [
+                {"text": "a", "_provenance": {"source_event_hash": "h1"}},
+                {"text": "b", "_provenance": {"source_event_hash": "h2"}},
+            ]
+            jsonl_path = write_snapshot(records, gpt2_root, ["--fable-eps"], "tombstone-hash", verbose=False)
+            self.assertTrue(jsonl_path.exists())
+            manifest_path = jsonl_path.with_suffix("").with_suffix(".manifest.json")
+            self.assertTrue(manifest_path.exists())
+
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(manifest["record_count"], 2)
+            self.assertEqual(manifest["tombstone_list_hash"], "tombstone-hash")
+            self.assertEqual(manifest["builder_args"], ["--fable-eps"])
+            # snapshot_id is deterministic: sha256 over sorted record hashes
+            expected_id = hashlib.sha256("h1h2".encode()).hexdigest()
+            self.assertEqual(manifest["snapshot_id"], expected_id)
+
+    def test_snapshot_id_is_order_independent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records_a = [{"_provenance": {"source_event_hash": "h1"}}, {"_provenance": {"source_event_hash": "h2"}}]
+            records_b = [{"_provenance": {"source_event_hash": "h2"}}, {"_provenance": {"source_event_hash": "h1"}}]
+            p1 = write_snapshot(records_a, Path(tmp), [], "x", verbose=False)
+            m1 = json.loads(p1.with_suffix("").with_suffix(".manifest.json").read_text())
+            p2 = write_snapshot(records_b, Path(tmp), [], "x", verbose=False)
+            m2 = json.loads(p2.with_suffix("").with_suffix(".manifest.json").read_text())
+            self.assertEqual(m1["snapshot_id"], m2["snapshot_id"])
+
+    def test_empty_records_snapshot_is_honest_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl_path = write_snapshot([], Path(tmp), [], "x", verbose=False)
+            self.assertTrue(jsonl_path.exists())
+            manifest = json.loads(jsonl_path.with_suffix("").with_suffix(".manifest.json").read_text())
+            self.assertEqual(manifest["record_count"], 0)
+            self.assertEqual(manifest["snapshot_id"], hashlib.sha256(b"").hexdigest())
 
 
 if __name__ == "__main__":
