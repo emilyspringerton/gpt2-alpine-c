@@ -2,6 +2,7 @@
 
 ## 2026-07-16
 
+- S146-06: rebuilt Track A general corpus (327 → 1228 records; golden-docs-index.md grew substantially since 2026-06-14, plus the six new HQ-SPEC docs auto-ingested) and refreshed var/perplexity-baseline.json (116.76 → 166.56 PPL — expected: larger, more specialized corpus is more out-of-distribution for base GPT-2, not a regression). Old baseline preserved in a `history` array. Post-fine-tune target unchanged: PPL < 60 on the same eval settings.
 - docs(northstar): Corpus Evolution — Bridge to FABLE E0 section: two-track corpus policy (general Emily corpus unchanged / narrow `--fable-eps` snapshot), fabledata placement call (separate Go component per HQ-SPEC-AI-103 §4a; this repo implements manifest v1 first in Python), `eps_headlines_to_records()` design over PRRJECT_FATBABY/var/eps with per-record provenance + verdict gating, snapshot manifest v1 shape, eval-tombstone mechanism (var/eval-tombstones.json + build-time exclusion). Backlog: EMILY SECTION 146 (S146-01..06)
 
 ## 2026-06-27

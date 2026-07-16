@@ -1,9 +1,9 @@
 {
-  "measured_at": "2026-06-14",
+  "measured_at": "2026-07-16",
   "model": "gpt2",
   "corpus": "emily-corpus.jsonl",
-  "corpus_records": 327,
-  "corpus_size_kb": 480.5,
+  "corpus_records": 1228,
+  "corpus_size_kb": 1220.1,
   "eval_settings": {
     "eval_frac": 0.05,
     "batch_size": 1,
@@ -12,10 +12,22 @@
     "flag": "--memory-efficient"
   },
   "results": {
-    "n_examples": 16,
-    "n_tokens": 1024,
-    "loss": 4.7601,
-    "perplexity": 116.76
+    "n_examples": 61,
+    "n_tokens": 3884,
+    "loss": 5.1153,
+    "perplexity": 166.56
   },
-  "notes": "Base GPT-2 (124M) on Emily Prime domain corpus. High PPL expected — Emily operational vocabulary (Apple, RSI, obs-watcher, HEIMDAL, IDUNA) is out-of-distribution for WebText-trained GPT-2 (baseline WebText PPL ~29). Post-fine-tune target: PPL < 60 on same eval set and settings."
+  "notes": "Base GPT-2 (124M) on Emily Prime domain corpus. High PPL expected — Emily operational vocabulary (Apple, RSI, obs-watcher, HEIMDAL, IDUNA) is out-of-distribution for WebText-trained GPT-2 (baseline WebText PPL ~29). Post-fine-tune target: PPL < 60 on same eval set and settings.",
+  "history": [
+    {
+      "measured_at": "2026-06-14",
+      "corpus_records": 327,
+      "corpus_size_kb": 480.5,
+      "n_examples": 16,
+      "n_tokens": 1024,
+      "loss": 4.7601,
+      "perplexity": 116.76,
+      "note": "S26 baseline, prior to Act II / HQ-SPEC 098-103 golden-doc registration"
+    }
+  ]
 }

@@ -14,4 +14,8 @@ checkpoint-*/
 
 # Training run logs
 var/train-*.log
+
+# Regenerable corpus builds (rebuild via emily train build-dataset)
+var/emily-corpus.jsonl
+var/snapshots/
 weights/emily-ft-20260623.bin
