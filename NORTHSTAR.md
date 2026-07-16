@@ -1,6 +1,6 @@
 # gpt2-alpine-c — Northstar
 
-*Last updated: 2026-06-14*
+*Last updated: 2026-07-16*
 
 ---
 
@@ -79,6 +79,152 @@ The corpus teaches the model:
 - EINHORN_INDUSTRIAL domain vocabulary (Apples, RSI, FatBaby signals, HEIMDAL)
 - Emily's output format (BACKLOG items, CHANGELOG entries, Apple bodies)
 - The planning→implementation→audit pattern
+
+---
+
+## Corpus Evolution — Bridge to FABLE E0 (S146)
+
+*Added 2026-07-16. Backlog: EMILY/BACKLOG.md SECTION 146. Governing spec: HQ-SPEC-AI-103 (FABLE), §4a data engine, §8 build order.*
+
+FABLE (BACKLOG SECTION 145) reuses this repo's validated fine-tune pipeline for its E0 rung:
+fine-tune published GPT-2 weights on EPS headlines, stand the whole stack up end-to-end. But
+FABLE's data requirements are stricter than what `prime_directive_dataset.py` produces today:
+per-record provenance tracing to a reality-rooted oracle (the filed 8-K), immutable
+content-addressed snapshots, and contamination tombstoning of eval records by hash. This section
+is the path from the current corpus builder to both purposes without breaking either.
+
+### Two tracks, one builder
+
+**Track A — general Emily corpus (unchanged).** The existing behavior — all Tier 1+2 golden docs,
+prime directive, BACKLOG, Apples, SEC filings, press releases, TYLER, game replays, dedup,
+stratified sampling — stays exactly as is. This corpus's value *is* its breadth: it teaches
+Emily-domain vocabulary and serves as the RSI entropy source (S26). The six freshly-registered
+HQ-SPEC docs (098–103, Tier 2) flow in automatically on the next build, which is correct: they
+are self-description, and self-description is this track's purpose. The perplexity baseline
+(116.76) predates them, so the next rebuild refreshes it.
+
+**Track B — FABLE E0 snapshot (new, narrow).** A separate build preset (`--fable-eps`, analogous
+to `--colab`) that emits EPS-headline records *only*: no golden docs, no TYLER, no Apples, no
+chunked SEC filings. Spec documents describing FABLE must never be FABLE's task training data,
+and they are useless for headline generation anyway. FABLE's thesis is auditability, not breadth
+— mixing the tracks would break both. Two corpora, one builder, distinguished by preset.
+
+### Where fabledata lives — the call
+
+**`fabledata` is a separate Go component (per HQ-SPEC-AI-103 §4a), not this repo. This repo
+implements the snapshot-manifest contract first, in Python, so E0 doesn't wait for the Go
+rewrite.** Rationale:
+
+1. The spec is explicit: fabledata is Go with house patterns (NDJSON readers, Iduna-schema'd
+   config). It belongs with the other Go services, not inside a C inference repo.
+2. E0's whole point is speed through reuse. This repo's extraction paths are already validated
+   (S26-02/05); blocking E0 on a Go rewrite inverts the build order in §8.
+3. The durable interface is not the code — it's the **snapshot manifest format** (below). This
+   repo defines and produces manifest v1 for E0; when Go `fabledata` lands (S145-01), it
+   inherits the format and takes over as producer. This repo's training pipeline then becomes a
+   *consumer* of fabledata snapshots — training never reads live stores either way.
+
+### What the EPS source actually is
+
+`sec_filings_to_records()` is **not** EPS-headline-scoped and is not the starting point for
+Track B. It reads generic secwatch `source_document_persisted` events, chunks `cleaned_text` at
+1500 chars, and carries no oracle linkage — chunking destroys record identity, which provenance
+requires. It stays as-is for Track A.
+
+The real EPS-headline corpus is `PRRJECT_FATBABY/var/eps/`:
+- `articles.ndjson` — one record per EPS headline: `source_identity` (e.g. `pr:302803511`),
+  ticker, headline, dek, body, period, `eps_value`, `is_gaap`, `publish_at`.
+- `oracle.ndjson` — one case per article: `case_id`, `extracted_eps`, `filed_eps`, `verdict`
+  (`pending` until eps-reconciler grades it against the filed 8-K).
+
+Track B needs a **new function** `eps_headlines_to_records()`: read both files, join article to
+oracle case by `source_identity`, emit one record per article (never chunked), and attach
+provenance. Only `verdict: confirmed` cases are FABLE-eligible — the label must be reality-rooted
+before the record trains anything (Löbian rule 1). `pending`/contradicted cases are excluded and
+counted. The store holds ~1 record today; volume accrues from eps-processor as earnings seasons
+pass — the pipeline shape is what gets built now.
+
+Per-record provenance fields (matching §4a): `source_event_hash` (sha256 of the raw article
+NDJSON line), `oracle` (eps-reconciler case id, plus 8-K accession when the reconciler carries
+it), `label_date` (case `recorded_at`), `license_class` (`own-exhaust` — the whole store is
+EINHORN's own event exhaust).
+
+### Snapshot manifest v1
+
+A snapshot is a pair of files under `var/snapshots/`, immutable once written:
+`eps-<YYYYMMDD>-<shorthash>.jsonl` (the records) + `.manifest.json`. The manifest is
+content-addressed: `snapshot_id` = sha256 over the sorted per-record hashes. Minimal v1 shape:
+
+```json
+{
+  "manifest_version": 1,
+  "snapshot_id": "sha256:3f9a…",
+  "created_at": "2026-07-16T00:00:00Z",
+  "builder": {
+    "script": "scripts/prime_directive_dataset.py",
+    "git_rev": "bc45295",
+    "args": ["--fable-eps"]
+  },
+  "tombstone_list": {
+    "path": "var/eval-tombstones.json",
+    "sha256": "sha256:0e12…"
+  },
+  "record_count": 1,
+  "records": [
+    {
+      "sha256": "sha256:a1b2…",
+      "source": "eps-headlines",
+      "provenance": {
+        "source_event_hash": "sha256:77cd…",
+        "source_identity": "pr:302803511",
+        "oracle": "eps-reconciler/eps:8bd28b7b713deb01",
+        "verdict": "confirmed",
+        "label_date": "2026-06-17",
+        "license_class": "own-exhaust"
+      }
+    }
+  ]
+}
+```
+
+That is the full v1 scope — sized to what E0 needs, not FABLE's eventual minhash-dedup/PII-scrub
+filter stack (that arrives with Go fabledata). Track A output can optionally gain a manifest
+later; it is not required for S26.
+
+### Contamination tombstoning — the minimal mechanism
+
+HQ-SPEC-AI-103 §8 step 2: the fableeval EPS suite freezes *before any training*, and its records
+are excluded from every training snapshot by hash — mechanical, not procedural. The smallest
+thing that satisfies this:
+
+- **`var/eval-tombstones.json`** in this repo: a git-committed flat list of
+  `{sha256, suite, frozen_at}` entries. The fableeval freeze step (S145-02) produces the hashes;
+  this file is where the builder reads them.
+- The carve-out happens **inside `prime_directive_dataset.py` at snapshot-build time**: after
+  record generation, before dedup/write, drop any record whose content hash appears in the
+  tombstone list. The manifest records the tombstone list's own hash (see above), so any
+  snapshot proves which exclusion set it was built under.
+- `corpus_stats.py` grows a check: zero tombstoned hashes present in the corpus, or fail — the
+  "contamination audit results (must be zero findings)" metric from §7.
+
+No service, no database, no flag soup — one file, one exclusion pass, one audit check.
+
+### Order of work
+
+1. **S146-01** — manifest v1 writer (`--snapshot` behavior in the builder). The contract Go
+   fabledata inherits; feeds S145-01.
+2. **S146-02** — `eps_headlines_to_records()` with provenance + verdict gating.
+3. **S146-03** — `--fable-eps` preset producing the immutable snapshot pair; feeds S145-03 (E0
+   training input).
+4. **S146-04** — tombstone list + exclusion pass + manifest linkage; consumes S145-02's frozen
+   suite hashes.
+5. **S146-05** — corpus_stats provenance/contamination audit mode.
+6. **S146-06** — Track A rebuild with HQ-SPEC 098–103 ingested; refresh perplexity baseline so
+   S26-04's eventual Colab run measures against current corpus numbers.
+
+Open per HQ-SPEC-AI-103 §9, deliberately not decided here: GPU posture, corpus mix beyond
+own-exhaust for E1 pretraining, distillation stance. Track B's E0 diet is 100% own-exhaust,
+which sidesteps all three for now.
 
 ---
 

@@ -1,5 +1,9 @@
 # gpt2-alpine-c Changelog
 
+## 2026-07-16
+
+- docs(northstar): Corpus Evolution — Bridge to FABLE E0 section: two-track corpus policy (general Emily corpus unchanged / narrow `--fable-eps` snapshot), fabledata placement call (separate Go component per HQ-SPEC-AI-103 §4a; this repo implements manifest v1 first in Python), `eps_headlines_to_records()` design over PRRJECT_FATBABY/var/eps with per-record provenance + verdict gating, snapshot manifest v1 shape, eval-tombstone mechanism (var/eval-tombstones.json + build-time exclusion). Backlog: EMILY SECTION 146 (S146-01..06)
+
 ## 2026-06-27
 
 - Add archetype engine (archetype.h/c) — 6 TYLER archetypes with natal/Hz/prefix; --archetype NAME steering, --classify perplexity scoring, --list-archetypes; Apple #4385
