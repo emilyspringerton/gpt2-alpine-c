@@ -45,34 +45,40 @@ on the IDUNA side — **not currently configured** (checked 2026-07-17, absent f
 
 Option A is faster for a one-off run today; do Option B if this becomes a repeated cycle.
 
-## 2. Open the notebook and configure
+## 2. Open the notebook and run the one cell (rewritten 2026-07-17)
 
-1. Upload `notebooks/gpt2_finetune_colab.ipynb` to Colab (colab.research.google.com → File →
-   Upload notebook), or open it from Drive if you also uploaded the notebook file there.
-2. **Runtime → Change runtime type → T4 GPU** (free tier). Confirm before running anything —
-   cell 5 (model/tokenizer load) will silently run on CPU and be far slower if you skip this.
-3. Run cell 1 (installs `transformers`/`datasets`/`accelerate`) and cell 2 (mounts Drive —
-   accept the auth prompt).
-4. **Cell 3 is the one to edit.** Set `DRIVE_FOLDER` to match the folder name from step 1
-   (e.g. `/content/drive/MyDrive/emily-gpt2`) and confirm `CORPUS_FILE` points at
-   `emily-corpus.jsonl` inside it.
-5. Run cells 4-6 as-is: load/inspect corpus → build `Dataset` → configure
-   `TrainingArguments`/`Trainer`. Defaults are reasonable for this corpus size (1048 records);
-   raise `num_train_epochs` if you want a longer run — T4 free-tier sessions cap around 12h idle /
-   have usage limits, but 1048 short records for a few epochs finishes in minutes, not hours.
-6. Run cell 7 — this is training. Watch for the loss curve; it should trend down. Saves to
-   `OUTPUT_DIR` on Drive automatically (cell 7's own save step), so a disconnect after this point
-   doesn't lose the result.
-7. Run cell 8 (perplexity eval) and cell 9 (generation smoke test) to sanity-check the result
-   before downloading anything — cell 9's output should read like Emily-domain text, not generic
-   GPT-2 filler, if training actually took.
+The notebook is down to a single reusable bootstrap cell — this is the "paste once, hit play"
+workflow, not a per-run walkthrough:
+
+1. Open directly from GitHub: Colab → File → Open notebook → GitHub tab →
+   `emilyspringerton/gpt2-alpine-c` → `notebooks/gpt2_finetune_colab.ipynb`. (Or upload it once —
+   either way, you never edit this file's cells again.)
+2. **Runtime → Change runtime type → T4 GPU** (free tier).
+3. Run the one code cell. It mounts Drive (accept the OAuth prompt when it appears), clones
+   `gpt2-alpine-c` into `/content/gpt2-alpine-c` (or `git pull`s it if already present from an
+   earlier run in the same session), then executes `scripts/colab_train.py` — which installs
+   `transformers`/`datasets`/`accelerate`, loads the corpus from
+   `DRIVE_FOLDER/emily-corpus.jsonl`, tokenizes, trains, saves the checkpoint back to Drive,
+   evaluates perplexity, and runs a generation smoke test — end to end, unattended.
+4. If your Drive folder isn't named `emily-training` (the default from step 1's Option A), set
+   `DRIVE_FOLDER` as an environment variable in the cell before the `subprocess.run` call, or pass
+   `--drive-folder` by editing the final line — this is the *only* line in the whole workflow that
+   should ever need a per-user tweak.
+
+**Why this matters going forward:** all the actual training logic (tokenization, hyperparameters,
+`TrainingArguments`, eval, generation prompts) lives in `scripts/colab_train.py`, in git — not
+pasted into notebook cells. Change training behavior by editing and pushing that script; the next
+"Run all" in Colab picks up the new version automatically via `git pull`, with nothing to
+re-paste or manually resync. `scripts/colab_train.py`'s CLI flags (`--epochs`, `--batch-size`,
+`--learning-rate`, etc., all env-var-overridable too) cover the tuning knobs the old per-cell
+`Cell 3`/`Cell 6` config used to expose.
 
 ## 3. Bring the checkpoint back
 
-1. From Drive (or Colab's file browser, left sidebar), download the output directory (cell 7's
-   `OUTPUT_DIR`, likely `checkpoint-final/` per the notebook's own "Next Steps" cell) as a
-   `.tar.gz`, or download the individual files (`config.json`, `model.safetensors` or
-   `pytorch_model.bin`, `tokenizer.json`, etc.).
+1. From Drive (or Colab's file browser, left sidebar), download the output directory
+   (`checkpoint-final/`, per `colab_train.py`'s `OUTPUT_DIR` default) as a `.tar.gz` — the script
+   already archives it there for you — or download the individual files (`config.json`,
+   `model.safetensors` or `pytorch_model.bin`, `tokenizer.json`, etc.).
 2. Get it onto this machine into `gpt2-alpine-c/checkpoint-emily-ft/` (same path
    `train_local.py` already writes to, so downstream tooling doesn't need new flags) — `scp`,
    or `drive_sync.py --download --pattern "checkpoint*.tar.gz"` if you went with Option B above.
