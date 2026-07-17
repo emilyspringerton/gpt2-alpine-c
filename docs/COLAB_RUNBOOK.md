@@ -1,0 +1,127 @@
+# Colab Training Runbook
+
+**Why this exists:** local CPU fine-tuning (`scripts/train_local.py`) does not fit on this VM
+alongside the live FatBaby pipeline. Confirmed 2026-07-17: with signalapi/processor/entity-graph/
+newssite/secwatch running (~3GB combined RSS on a 3.8GB box), free RAM drops to ~140-300MB the
+moment `train_local.py` starts loading the model, and the process is silently killed (no
+traceback — consistent with an OOM kill, not a script bug) within seconds of starting step 0,
+twice, at two different memory footprints. **Colab's free-tier T4 GPU is the real path** — this
+was already Milestone 2's design (`notebooks/gpt2_finetune_colab.ipynb` has existed since
+2026-06-14); this doc is the concrete step-by-step to actually run it.
+
+Corpus is already built and current as of this runbook: `var/emily-corpus.jsonl`, 1048 records,
+1.3MB (`python3 scripts/prime_directive_dataset.py --emily-root /home/fatbaby/EMILY --apples-dir
+/home/fatbaby/APPLES --output var/emily-corpus.jsonl --colab`, run 2026-07-17, reflects the full
+current golden-docs-index including today's NORN/PRIME-097/TYLER additions). Re-run that command
+before starting if it's been more than a day or two — golden docs change fast in this repo.
+
+---
+
+## 1. Get the corpus into Colab
+
+`scripts/drive_sync.py` (the automated upload path) needs `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` set
+on the IDUNA side — **not currently configured** (checked 2026-07-17, absent from
+`IDUNA/var/*.env` and no running process has it set). Two options:
+
+**Option A — manual upload (works right now, no setup):**
+1. Download `var/emily-corpus.jsonl` from this machine to your local computer (`scp` or however
+   you normally pull files off this VM).
+2. Go to [drive.google.com](https://drive.google.com), create/open a folder named exactly
+   `emily-training` at the top level of My Drive — this matches the notebook's default
+   `DRIVE_FOLDER` (cell 3: `/content/drive/MyDrive/emily-training`), so you don't have to edit
+   that cell. Drag the corpus file in.
+3. If you'd rather use a different folder name, that's fine too — just edit `DRIVE_FOLDER` in
+   cell 3 to match before running it.
+
+**Option B — configure Drive API first (better for repeat runs):**
+1. Create a GCP service account with Drive API access, download its JSON key.
+2. On this machine: `export GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=/path/to/key.json` and
+   `export GOOGLE_DRIVE_FOLDER_ID=<folder-id>` in IDUNA's environment, restart IDUNA.
+3. Then: `IDUNA_BASE_URL=http://localhost:8080 IDUNA_AGENT_NAME=EMILY-TRAINING
+   IDUNA_AGENT_SECRET=<from IDUNA/var/agent-secrets.env, IDUNA_SECRET_EMILY_TRAINING>
+   python3 scripts/drive_sync.py --upload var/emily-corpus.jsonl` (run from
+   `/home/fatbaby/gpt2-alpine-c`).
+4. Every future corpus rebuild is then one command instead of a manual download/upload.
+
+Option A is faster for a one-off run today; do Option B if this becomes a repeated cycle.
+
+## 2. Open the notebook and configure
+
+1. Upload `notebooks/gpt2_finetune_colab.ipynb` to Colab (colab.research.google.com → File →
+   Upload notebook), or open it from Drive if you also uploaded the notebook file there.
+2. **Runtime → Change runtime type → T4 GPU** (free tier). Confirm before running anything —
+   cell 5 (model/tokenizer load) will silently run on CPU and be far slower if you skip this.
+3. Run cell 1 (installs `transformers`/`datasets`/`accelerate`) and cell 2 (mounts Drive —
+   accept the auth prompt).
+4. **Cell 3 is the one to edit.** Set `DRIVE_FOLDER` to match the folder name from step 1
+   (e.g. `/content/drive/MyDrive/emily-gpt2`) and confirm `CORPUS_FILE` points at
+   `emily-corpus.jsonl` inside it.
+5. Run cells 4-6 as-is: load/inspect corpus → build `Dataset` → configure
+   `TrainingArguments`/`Trainer`. Defaults are reasonable for this corpus size (1048 records);
+   raise `num_train_epochs` if you want a longer run — T4 free-tier sessions cap around 12h idle /
+   have usage limits, but 1048 short records for a few epochs finishes in minutes, not hours.
+6. Run cell 7 — this is training. Watch for the loss curve; it should trend down. Saves to
+   `OUTPUT_DIR` on Drive automatically (cell 7's own save step), so a disconnect after this point
+   doesn't lose the result.
+7. Run cell 8 (perplexity eval) and cell 9 (generation smoke test) to sanity-check the result
+   before downloading anything — cell 9's output should read like Emily-domain text, not generic
+   GPT-2 filler, if training actually took.
+
+## 3. Bring the checkpoint back
+
+1. From Drive (or Colab's file browser, left sidebar), download the output directory (cell 7's
+   `OUTPUT_DIR`, likely `checkpoint-final/` per the notebook's own "Next Steps" cell) as a
+   `.tar.gz`, or download the individual files (`config.json`, `model.safetensors` or
+   `pytorch_model.bin`, `tokenizer.json`, etc.).
+2. Get it onto this machine into `gpt2-alpine-c/checkpoint-emily-ft/` (same path
+   `train_local.py` already writes to, so downstream tooling doesn't need new flags) — `scp`,
+   or `drive_sync.py --download --pattern "checkpoint*.tar.gz"` if you went with Option B above.
+
+## 4. Convert and validate (same steps as any fine-tune, Colab or local)
+
+```bash
+cd /home/fatbaby/gpt2-alpine-c
+
+# HuggingFace checkpoint → C binary weights
+python3 scripts/convert_ft_checkpoint.py \
+  --checkpoint ./checkpoint-emily-ft \
+  --output ./weights/emily-ft.bin
+
+# Perplexity: base vs fine-tuned, same eval settings as every prior milestone
+python3 scripts/eval_perplexity.py \
+  --corpus var/emily-corpus.jsonl \
+  --checkpoint ./checkpoint-emily-ft \
+  --compare --memory-efficient
+
+# Entropy source check (what the RSI loop actually consumes)
+./gpt2_run weights/emily-ft.bin --entropy-stats
+```
+
+**Target, per NORTHSTAR.md Milestone 3:** entropy delta ≥ 0.5 nats over base (base H_mean=4.4877).
+The 2026-06-23 local 300-step CPU run only reached +0.17 nats — explicitly noted then as
+"Colab T4 full fine-tune required" to hit target. This run is that attempt.
+
+## 5. Commit the result
+
+Checkpoints are large — this repo already has Git LFS set up for exactly this
+(`emily-ft.bin`, `model.bin`, `checkpoint-emily-ft/model.safetensors` are LFS-tracked, per
+CHANGELOG 2026-06-16). Standard flow:
+
+```bash
+git add weights/emily-ft.bin checkpoint-emily-ft/
+git commit -m "feat(training): Colab T4 fine-tune — <N> epochs, <entropy delta> nats"
+git push
+```
+
+Then update `NORTHSTAR.md` Milestone 2/3 status and file an Apple
+(`emily apples post -t completion "Colab T4 fine-tune complete" "..."`) — matches the pattern
+every prior training milestone in this repo's CHANGELOG.md already follows.
+
+---
+
+## If Colab's free tier isn't enough
+
+Corpus is small (1048 records / ~1.3MB) — a full fine-tune should comfortably finish in one
+free-tier T4 session. If you hit a usage-limit wall anyway: reduce `num_train_epochs` in cell 6,
+or fall back to Colab Pro for guaranteed GPU time. Not expected to be necessary at this corpus
+size.
