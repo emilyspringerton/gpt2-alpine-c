@@ -119,3 +119,7 @@ After creating docs, register in EMILY/context/golden-docs-index.md:
 - `EMILY` — golden docs, prime directive, RSI training data sources
 - `IDUNA` — Drive API at `/api/v1/drive/*`, EMILY-TRAINING agent
 - `EMILY/context/golden-docs-index.md` — register new docs here
+
+## Commit Protocol (standing instruction)
+
+Always commit and push completed work immediately — don't wait to be asked. This is the default for every repo in this monorepo.
