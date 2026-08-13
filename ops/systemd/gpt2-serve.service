@@ -1,0 +1,37 @@
+# gpt2-alpine-c serve — user-level systemd unit (no sudo required)
+#
+# Deploy:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/systemd/gpt2-serve.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gpt2-serve.service
+#   systemctl --user status gpt2-serve.service
+#
+# Added 2026-08-13 (EMILY/BACKLOG.md INTAKE QUEUE, "processify the gpt2-alpine-c
+# serve.py + broker manual restarts") — closes the reboot runbook's last known
+# manual-restart gap. Loads the fine-tuned checkpoint once at startup, serves
+# on :8088. Fronted by fatbaby-broker.service (PRRJECT_FATBABY/cmd/broker) for
+# emily-agent's Apple-enrichment calls.
+#
+# NOTE: scripts/serve.py uses stdlib http.server (BaseHTTPRequestHandler over
+# plain HTTPServer, not threaded) -- requests are handled serially and a cold
+# CPU-bound /generate call has been observed taking several minutes. Not
+# addressed by this unit; flagged as a separate finding, not fixed here.
+#
+[Unit]
+Description=gpt2-alpine-c inference server (emily-ft checkpoint, :8088)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/gpt2-alpine-c
+ExecStart=/usr/bin/python3 scripts/serve.py --model ft --port 8088
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:/home/fatbaby/EMILY/var/logs/gpt2-serve.log
+StandardError=append:/home/fatbaby/EMILY/var/logs/gpt2-serve.log
+MemoryMax=2G
+TasksMax=64
+
+[Install]
+WantedBy=default.target
