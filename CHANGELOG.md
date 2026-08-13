@@ -1,5 +1,10 @@
 # gpt2-alpine-c Changelog
 
+## 2026-08-13
+
+- Added gpt2-serve.service systemd unit (processified the manual serve.py restart from the reboot runbook) (sess-20260813-2154-dda37e8b)
+
+
 ## 2026-07-19
 
 - Local GPT-2 training round abandoned mid-run (500 steps, ETA ~54h at observed rate — too slow/risky for this box's CPU-only setup). Confirms the existing COLAB_RUNBOOK.md guidance: real fine-tuning belongs on Colab, not local CPU training beyond a 50-step smoke test.
