@@ -6,9 +6,11 @@ Run before uploading to Colab to verify corpus health.
 
 Usage:
     python3 scripts/corpus_stats.py [--corpus /tmp/emily-corpus.jsonl] [--verbose]
+    python3 scripts/corpus_stats.py --provenance-audit --corpus var/snapshots/eps-....jsonl
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -34,12 +36,148 @@ def detect_duplicates(texts: list[str], threshold: float = 0.95) -> int:
     return dupes
 
 
+def load_provenance_records(corpus_path: Path) -> list[dict]:
+    """Read a snapshot corpus and return only records carrying a
+    `_provenance` block (S146-01/02 snapshot format). Records without one
+    (e.g. a general Track A corpus with no oracle-graded source) are
+    silently excluded from the audit -- they have nothing to audit, not a
+    finding.
+    """
+    records = []
+    with corpus_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("_provenance"):
+                records.append(rec)
+    return records
+
+
+def provenance_breakdown(records: list[dict]) -> dict:
+    """S146-05: verdict / source-pipeline / license-class breakdown for a
+    snapshot corpus. "Source pipeline" stands in for HQ-SPEC-AI-103 §7's
+    "oracle" metric -- the schema's `_provenance` block carries
+    `oracle_case_id` (which case, not which oracle) and the record's own
+    `_source` (e.g. "eps-headlines"), not a named oracle field; `_source`
+    is the closest real proxy for "which oracle labeled this" without
+    inventing a field the schema doesn't have.
+    """
+    verdicts: Counter = Counter()
+    sources: Counter = Counter()
+    license_classes: Counter = Counter()
+    for rec in records:
+        prov = rec.get("_provenance") or {}
+        verdicts[prov.get("verdict", "unknown")] += 1
+        sources[rec.get("_source", "unknown")] += 1
+        license_classes[prov.get("license_class", "unknown")] += 1
+    return {
+        "verdicts": dict(verdicts),
+        "sources": dict(sources),
+        "license_classes": dict(license_classes),
+    }
+
+
+def load_tombstone_hashes(gpt2_root: Path) -> set[str]:
+    """Same file S146-04's `load_eval_tombstones` reads
+    (var/eval-tombstones.json); re-read here independently rather than
+    imported from prime_directive_dataset.py so this audit can run standalone
+    against any snapshot file, including ones built by a different tool
+    (e.g. Go `fabledata`, S145-01) that never imports this Python module.
+    Missing file -> empty set, not an error (no suite frozen yet is a valid,
+    honest state -- same convention S146-04 itself uses).
+    """
+    path = gpt2_root / "var" / "eval-tombstones.json"
+    if not path.exists():
+        return set()
+    entries = json.loads(path.read_text())
+    return {e["sha256"] for e in entries if "sha256" in e}
+
+
+def check_contamination(records: list[dict], tombstones: set[str]) -> list[str]:
+    """Returns the list of source_event_hash values present in BOTH the
+    snapshot and the frozen eval-tombstone set -- HQ-SPEC-AI-103 §7's
+    "contamination audit results (must be zero findings)" metric. An eval
+    record leaking into a training snapshot is exactly the failure
+    apply_tombstones (S146-04) is supposed to prevent at build time; this
+    audit is the independent check that it actually did.
+    """
+    if not tombstones:
+        return []
+    found = []
+    for rec in records:
+        h = (rec.get("_provenance") or {}).get("source_event_hash")
+        if h and h in tombstones:
+            found.append(h)
+    return found
+
+
+def run_provenance_audit(corpus_path: Path, gpt2_root: Path, verbose: bool) -> int:
+    """Runs the S146-05 provenance audit and prints a report. Returns the
+    process exit code: 0 clean, 1 if any tombstoned hash was found in the
+    snapshot (a real contamination finding, not a warning to note and move
+    past).
+    """
+    records = load_provenance_records(corpus_path)
+    print(f"{'='*55}")
+    print(f"  PROVENANCE AUDIT — {corpus_path.name}")
+    print(f"{'='*55}")
+
+    if not records:
+        print("  No _provenance-bearing records found -- nothing to audit.")
+        print("  (Not an error: a general Track A corpus has no oracle-graded")
+        print("   source. Point --corpus at a snapshot .jsonl to audit one.)")
+        print(f"{'='*55}")
+        return 0
+
+    breakdown = provenance_breakdown(records)
+    print(f"  Records with provenance: {len(records)}")
+    print()
+    print("  By verdict:")
+    for verdict, count in sorted(breakdown["verdicts"].items(), key=lambda kv: -kv[1]):
+        print(f"    {verdict:<20} {count:>6}")
+    print()
+    print("  By source pipeline (oracle proxy):")
+    for src, count in sorted(breakdown["sources"].items(), key=lambda kv: -kv[1]):
+        print(f"    {src:<20} {count:>6}")
+    print()
+    print("  By license class:")
+    for lic, count in sorted(breakdown["license_classes"].items(), key=lambda kv: -kv[1]):
+        print(f"    {lic:<20} {count:>6}")
+
+    tombstones = load_tombstone_hashes(gpt2_root)
+    contaminated = check_contamination(records, tombstones)
+    print()
+    print(f"  Contamination check ({len(tombstones)} frozen eval hashes loaded):")
+    if contaminated:
+        print(f"    ✗ FAIL: {len(contaminated)} tombstoned hash(es) present in this snapshot")
+        if verbose:
+            for h in contaminated:
+                print(f"      {h}")
+        print(f"{'='*55}")
+        return 1
+    print("    ✓ zero findings")
+    print(f"{'='*55}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Corpus quality stats")
     parser.add_argument("--corpus", default="/tmp/emily-corpus.jsonl",
                         help="Path to JSONL corpus (default: /tmp/emily-corpus.jsonl)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show per-source breakdown")
+    parser.add_argument("--provenance-audit", action="store_true",
+                        help="S146-05: audit a snapshot corpus's verdict/oracle/license-class "
+                             "breakdown + eval-tombstone contamination check, instead of the "
+                             "general quality stats below")
+    parser.add_argument("--gpt2-root", default=None,
+                        help="Repo root for --provenance-audit's tombstone lookup "
+                             "(default: this script's own repo)")
     args = parser.parse_args()
 
     corpus_path = Path(args.corpus)
@@ -48,6 +186,10 @@ def main():
         print("  Run: python3 scripts/prime_directive_dataset.py --output /tmp/emily-corpus.jsonl",
               file=sys.stderr)
         sys.exit(1)
+
+    if args.provenance_audit:
+        gpt2_root = Path(args.gpt2_root) if args.gpt2_root else Path(__file__).resolve().parent.parent
+        sys.exit(run_provenance_audit(corpus_path, gpt2_root, args.verbose))
 
     records = []
     with corpus_path.open() as f:
