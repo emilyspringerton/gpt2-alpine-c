@@ -1,5 +1,9 @@
 # gpt2-alpine-c Changelog
 
+## 2026-08-15
+
+- S146-05：corpus_stats.py新增--provenance-audit模式(HQ-SPEC-AI-103 §7 contamination audit metric)——snapshot corpus的verdict/source-pipeline/license-class breakdown,對照var/eval-tombstones.json(S146-04)做真的contamination check,有重疊就exit non-zero不只是warning。15個新測試,全套55/55綠。線上跑真的--fable-eps snapshot(0筆,正確——現在0筆confirmed)+合成contaminated snapshot(正確抓到)。Apple #13726,commit 192d906。 (sess-20260813-2154-dda37e8b)
+
 ## 2026-08-13
 
 - Added gpt2-serve.service systemd unit (processified the manual serve.py restart from the reboot runbook) (sess-20260813-2154-dda37e8b)
