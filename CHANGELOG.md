@@ -1,5 +1,9 @@
 # gpt2-alpine-c Changelog
 
+## 2026-08-15 (2)
+
+- S150-01：towerprint-augmented training records——新增cmd/towerprint-cli當Python↔Go interop point(prime_directive_dataset.py shell out呼叫,不在Python重寫squish/tower/gematria邏輯)。新增--towerprint-augment flag,deterministic sha256取樣(不用Python自己的randomized hash()),預設5%(照item自己的指示"決定比例,不要default 100%")。4個Go測試+10個Python測試,全套65/65+4/4綠。線上跑真corpus驗證:20%取樣產生347組真的{text}→{tower} pairs,0個skip。Apple #13734,commit 00da185。 (sess-20260813-2154-dda37e8b)
+
 ## 2026-08-15
 
 - S146-05：corpus_stats.py新增--provenance-audit模式(HQ-SPEC-AI-103 §7 contamination audit metric)——snapshot corpus的verdict/source-pipeline/license-class breakdown,對照var/eval-tombstones.json(S146-04)做真的contamination check,有重疊就exit non-zero不只是warning。15個新測試,全套55/55綠。線上跑真的--fable-eps snapshot(0筆,正確——現在0筆confirmed)+合成contaminated snapshot(正確抓到)。Apple #13726,commit 192d906。 (sess-20260813-2154-dda37e8b)
