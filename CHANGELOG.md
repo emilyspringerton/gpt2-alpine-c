@@ -1,5 +1,9 @@
 # gpt2-alpine-c Changelog
 
+## 2026-08-15 (3)
+
+- S150-02 v0：新增pkg/vectorcache——照docs/reference/vector_cache.md真的邏輯港口(Merkle hash、flat cosine similarity search、hit/miss stats,都沒簡化)。誠實的v0範圍:只出StubEmbedder(sha256-based,明確聲明不是真的語意embedding),真embedder(sentence-transformers HTTP service)是follow-up工作不是這裡假裝的。Embedder介面可插拔,之後換真embedder不用改Cache本體。不擁有LLM client/credentials,Lookup/Add分開呼叫,caller自己接miss->fetch->Add。19個測試含-race全綠。真demo跑過:5個查詢2 hit/3 miss/40%命中率,數字都對。Apple #13736,commit 2953b21。 (sess-20260813-2154-dda37e8b)
+
 ## 2026-08-15 (2)
 
 - S150-01：towerprint-augmented training records——新增cmd/towerprint-cli當Python↔Go interop point(prime_directive_dataset.py shell out呼叫,不在Python重寫squish/tower/gematria邏輯)。新增--towerprint-augment flag,deterministic sha256取樣(不用Python自己的randomized hash()),預設5%(照item自己的指示"決定比例,不要default 100%")。4個Go測試+10個Python測試,全套65/65+4/4綠。線上跑真corpus驗證:20%取樣產生347組真的{text}→{tower} pairs,0個skip。Apple #13734,commit 00da185。 (sess-20260813-2154-dda37e8b)
