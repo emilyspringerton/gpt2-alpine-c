@@ -18,11 +18,21 @@ weights/tokenizer.bin: weights/tokenizer.json scripts/build_tokenizer_bin.py
 
 tokenizer: weights/tokenizer.bin
 
-test: $(BIN)
+# S150-01: Python↔Go interop point for towerprint-augmented training
+# records (scripts/prime_directive_dataset.py --towerprint-augment).
+bin/towerprint-cli: cmd/towerprint-cli/main.go pkg/towerprint/*.go
+	@mkdir -p bin
+	go build -o bin/towerprint-cli ./cmd/towerprint-cli
+
+towerprint-cli: bin/towerprint-cli
+
+test: $(BIN) bin/towerprint-cli
 	@bash tests/test_compile.sh
-	@python3 -m pytest tests/test_dataset.py -v 2>/dev/null || python3 tests/test_dataset.py
+	@python3 -m pytest tests/test_dataset.py tests/test_corpus_stats.py -v 2>/dev/null || (python3 tests/test_dataset.py && python3 tests/test_corpus_stats.py)
+	@cd pkg/towerprint && go test ./...
 
 clean:
 	rm -f $(OBJ) $(BIN)
+	rm -rf bin/
 
-.PHONY: all clean test tokenizer
+.PHONY: all clean test tokenizer towerprint-cli

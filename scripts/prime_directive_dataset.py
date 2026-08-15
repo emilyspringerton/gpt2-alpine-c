@@ -834,6 +834,107 @@ def stratified_sample(records: list[dict], max_records: int) -> list[dict]:
     return sampled
 
 
+# Default fraction of the corpus to augment with towerprint pairs (S150-01).
+# Flavor/capability, not the corpus's primary purpose -- the item's own text
+# says "decide the fraction, don't default to 100%." 5% chosen as a
+# reasonable default: enough for a fine-tune to pick up the pattern (the
+# tower transform is a compact, highly regular target -- it doesn't need a
+# large share of training signal to learn) without displacing the corpus's
+# real content.
+DEFAULT_TOWERPRINT_FRACTION = 0.05
+
+# Cap on how much of a record's own text gets fed into the tower transform.
+# Squish only collapses *consecutive* repeats (see pkg/towerprint's own
+# Squish doc comment), not full dedup, so a very long input (a chunked SEC
+# filing, say) can still produce a long tower -- capped here to keep each
+# augmented pair a compact, digestible example, not a rare oversized outlier
+# among otherwise short instruction pairs.
+TOWERPRINT_INPUT_CHARS = 500
+
+
+def _stable_sample_keep(record: dict, fraction: float) -> bool:
+    """Deterministic sampling by content hash -- NOT Python's built-in
+    hash() (this file's own deduplicate() uses that, but hash() is
+    randomized per-process via PYTHONHASHSEED unless explicitly disabled,
+    which would make a re-run over the same corpus pick a *different*
+    augmented subset each time). sha256 here instead, so re-running the
+    builder against unchanged input always augments the same records --
+    the same reproducibility convention every other step in this file
+    (snapshot_id, source_event_hash) already follows.
+    """
+    key = record.get("text") or (record.get("prompt", "") + record.get("completion", ""))
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    # First 8 hex chars -> uniform int in [0, 2^32); compare against the
+    # fraction of that range.
+    bucket = int(digest[:8], 16) / 0xFFFFFFFF
+    return bucket < fraction
+
+
+def towerprint_augmented_records(
+    records: list[dict],
+    fraction: float,
+    cli_path: Path,
+    verbose: bool,
+) -> list[dict]:
+    """S150-01: for a sample of the corpus, emit an instruction pair
+    {text} -> {tower} teaching a fine-tuned checkpoint to natively produce
+    the house transform -- the 2020 original's actual technique (feed the
+    tower back to the model, see how it reads) becomes a training signal
+    instead of a one-off ritual.
+
+    Shells out to cmd/towerprint-cli rather than reimplementing
+    pkg/towerprint's squish/tower/gematria logic in Python -- one source of
+    truth for the transform, not two that can drift.
+    """
+    if fraction <= 0 or not records:
+        return []
+    if not cli_path.exists():
+        print(f"  towerprint-augment: CLI binary not found at {cli_path}, skipping "
+              f"(build it: cd gpt2-alpine-c && go build -o {cli_path} ./cmd/towerprint-cli)",
+              file=sys.stderr)
+        return []
+
+    sampled = [r for r in records if _stable_sample_keep(r, fraction)]
+    augmented = []
+    skipped = 0
+    for rec in sampled:
+        text = (rec.get("text") or (rec.get("prompt", "") + "\n" + rec.get("completion", ""))).strip()
+        if not text:
+            continue
+        text = text[:TOWERPRINT_INPUT_CHARS]
+        try:
+            result = subprocess.run(
+                [str(cli_path)], input=text, capture_output=True, text=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            skipped += 1
+            continue
+        if result.returncode != 0:
+            # No letters in this record's text, or a CLI-side error -- skip
+            # this one record, don't fail the whole augmentation pass.
+            skipped += 1
+            continue
+        try:
+            fp = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            skipped += 1
+            continue
+        tower = fp.get("tower")
+        if not tower:
+            skipped += 1
+            continue
+        augmented.append({
+            "prompt": text,
+            "completion": "\n".join(tower),
+            "_source": "towerprint-augmented",
+        })
+
+    if verbose:
+        print(f"  towerprint-augment: {len(augmented)} pairs from {len(sampled)} sampled "
+              f"records ({fraction:.0%} of {len(records)}), {skipped} skipped (no letters/error)")
+    return augmented
+
+
 def load_game_replays(replay_dir: "Path", max_records: int = 0, verbose: bool = False) -> list:
     """Load SHANKPIT replay NDJSON files as instruction pairs {prompt, completion, _source}."""
     from pathlib import Path as _Path
@@ -900,6 +1001,13 @@ def main():
                         help="Disable deduplication")
     parser.add_argument("--max-records", type=int, default=0,
                         help="Cap total output records via stratified sampling (0=unlimited)")
+    parser.add_argument("--towerprint-augment", action="store_true",
+                        help="S150-01: augment a sample of the corpus with {text} -> {tower} "
+                             "instruction pairs via cmd/towerprint-cli (pkg/towerprint)")
+    parser.add_argument("--towerprint-fraction", type=float, default=DEFAULT_TOWERPRINT_FRACTION,
+                        help=f"Fraction of records to augment (default {DEFAULT_TOWERPRINT_FRACTION:.0%})")
+    parser.add_argument("--towerprint-cli", default=None,
+                        help="Path to the towerprint-cli binary (default: <gpt2-root>/bin/towerprint-cli)")
     # Preset
     parser.add_argument("--colab", action="store_true",
                         help="Colab-safe preset: Emily operational text only, deduped, max 1500 records."
@@ -1014,6 +1122,14 @@ def main():
         records.extend(game_records)
         if args.verbose:
             print(f"  Game replays: {len(game_records)} instruction pairs from {args.game_replays}")
+
+    # Towerprint augmentation (S150-01) — before dedup/tombstoning/cap so the
+    # augmented pairs go through the same downstream pipeline as everything
+    # else, not a bolt-on exempt from it.
+    if args.towerprint_augment:
+        cli_path = Path(args.towerprint_cli) if args.towerprint_cli else gpt2_root / "bin" / "towerprint-cli"
+        tower_records = towerprint_augmented_records(records, args.towerprint_fraction, cli_path, args.verbose)
+        records.extend(tower_records)
 
     # Deduplication
     if args.dedupe:

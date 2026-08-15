@@ -28,7 +28,9 @@ from prime_directive_dataset import (
     make_lm_records,
     parse_golden_index,
     prime_directive_to_instruct,
+    towerprint_augmented_records,
     write_snapshot,
+    _stable_sample_keep,
 )
 
 
@@ -480,6 +482,110 @@ class TestWriteSnapshot(unittest.TestCase):
             manifest = json.loads(jsonl_path.with_suffix("").with_suffix(".manifest.json").read_text())
             self.assertEqual(manifest["record_count"], 0)
             self.assertEqual(manifest["snapshot_id"], hashlib.sha256(b"").hexdigest())
+
+
+class TestStableSampleKeep(unittest.TestCase):
+    def test_deterministic_across_calls(self):
+        rec = {"text": "a stable sampling test record"}
+        first = _stable_sample_keep(rec, 0.5)
+        second = _stable_sample_keep(rec, 0.5)
+        self.assertEqual(first, second)
+
+    def test_zero_fraction_keeps_nothing(self):
+        for i in range(20):
+            rec = {"text": f"record {i}"}
+            self.assertFalse(_stable_sample_keep(rec, 0.0))
+
+    def test_full_fraction_keeps_everything(self):
+        for i in range(20):
+            rec = {"text": f"record {i}"}
+            self.assertTrue(_stable_sample_keep(rec, 1.0))
+
+    def test_roughly_matches_requested_fraction(self):
+        # Not a tight statistical test -- just confirms the sampler isn't
+        # wildly miscalibrated (e.g. off by a factor of 2, or inverted).
+        kept = sum(
+            1 for i in range(2000)
+            if _stable_sample_keep({"text": f"record number {i}"}, 0.1)
+        )
+        self.assertGreater(kept, 100)   # want ~200, allow wide margin
+        self.assertLess(kept, 400)
+
+
+class TestTowerprintAugmentedRecords(unittest.TestCase):
+    def _fake_cli(self, tmp: Path, behavior: str = "ok") -> Path:
+        """A fake towerprint-cli standing in for the real Go binary, so
+        these tests don't depend on `make towerprint-cli` having been run
+        first -- same reasoning the rest of this file's tests use fixtures
+        instead of hitting real external state.
+        """
+        script = tmp / "fake-towerprint-cli.py"
+        if behavior == "ok":
+            script.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys, json\n"
+                "text = sys.stdin.read()\n"
+                "if not any(c.isalpha() for c in text):\n"
+                "    print(json.dumps({'error': 'no letters'})); sys.exit(1)\n"
+                "print(json.dumps({'tower': ['ROW1', 'ROW2']}))\n"
+            )
+        elif behavior == "always_fail":
+            script.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys, json\n"
+                "print(json.dumps({'error': 'always fails'})); sys.exit(1)\n"
+            )
+        script.chmod(0o755)
+        return script
+
+    def test_zero_fraction_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(Path(tmp))
+            records = [{"text": "some record text"}]
+            result = towerprint_augmented_records(records, 0.0, cli, verbose=False)
+            self.assertEqual(result, [])
+
+    def test_missing_cli_binary_returns_empty_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "does-not-exist"
+            records = [{"text": "some record text"}]
+            result = towerprint_augmented_records(records, 1.0, missing, verbose=False)
+            self.assertEqual(result, [])
+
+    def test_full_fraction_produces_pairs_for_all_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(Path(tmp))
+            records = [
+                {"text": "Emily Prime record one"},
+                {"text": "Emily Prime record two"},
+            ]
+            result = towerprint_augmented_records(records, 1.0, cli, verbose=False)
+            self.assertEqual(len(result), 2)
+            for rec in result:
+                self.assertIn("prompt", rec)
+                self.assertIn("completion", rec)
+                self.assertEqual(rec["_source"], "towerprint-augmented")
+                self.assertEqual(rec["completion"], "ROW1\nROW2")
+
+    def test_cli_failure_skips_record_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(Path(tmp), behavior="always_fail")
+            records = [{"text": "some record text"}]
+            result = towerprint_augmented_records(records, 1.0, cli, verbose=False)
+            self.assertEqual(result, [])
+
+    def test_input_text_capped_before_hashing_to_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(Path(tmp))
+            records = [{"text": "x" * 5000}]
+            result = towerprint_augmented_records(records, 1.0, cli, verbose=False)
+            self.assertEqual(len(result), 1)
+            self.assertLessEqual(len(result[0]["prompt"]), 500)
+
+    def test_empty_records_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(Path(tmp))
+            self.assertEqual(towerprint_augmented_records([], 1.0, cli, verbose=False), [])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 gpt2_run
+bin/
 *.o
 __pycache__/
 *.pyc
