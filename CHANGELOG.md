@@ -1,5 +1,10 @@
 # gpt2-alpine-c Changelog
 
+## 2026-08-25
+
+- added auto-release CI job (PITVIPER pattern): real, non-prerelease GitHub release with Linux+Windows gpt2_run binaries (sess-20260825-1938-f6bd411e)
+
+
 ## 2026-08-15 (3)
 
 - S150-02 v0：新增pkg/vectorcache——照docs/reference/vector_cache.md真的邏輯港口(Merkle hash、flat cosine similarity search、hit/miss stats,都沒簡化)。誠實的v0範圍:只出StubEmbedder(sha256-based,明確聲明不是真的語意embedding),真embedder(sentence-transformers HTTP service)是follow-up工作不是這裡假裝的。Embedder介面可插拔,之後換真embedder不用改Cache本體。不擁有LLM client/credentials,Lookup/Add分開呼叫,caller自己接miss->fetch->Add。19個測試含-race全綠。真demo跑過:5個查詢2 hit/3 miss/40%命中率,數字都對。Apple #13736,commit 2953b21。 (sess-20260813-2154-dda37e8b)
