@@ -10,6 +10,19 @@
       "allowed_paths": ["/generate", "/health"],
       "max_body_bytes": 1048576,
       "enabled": true
+    },
+    {
+      "tenant_id": "jewel-jupyter",
+      "upstream_base": "http://127.0.0.1:8890",
+      "upstream_key": "",
+      "strip_headers": ["Authorization"],
+      "inject_headers": {},
+      "max_body_bytes": 33554432,
+      "enabled": true,
+      "path_prefix": "/jewel/",
+      "basic_auth_user": "jewel",
+      "basic_auth_password_hash": "$2a$10$0srEL1c44Cn.5/P5nvN4huMO.fB4F4mU1Af2MR5C5zAJwsMql8/uC",
+      "supports_upgrade": true
     }
   ]
 }
